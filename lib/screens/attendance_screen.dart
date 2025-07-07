@@ -140,18 +140,25 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     
     // Check for pending sync
     final pendingCount = await db.getPendingAttendances();
+    
     if (pendingCount.isNotEmpty) {
       _showSyncInProgress();
       await ApiService().processPendingSyncs();
+         if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                 SnackBar(content: Text('✅ Unsent attendances are sent to admin! All good!'),
+                 duration: const Duration(seconds: 5),
+                 ),
+              );
+            }
       _hideSyncInProgress();
     }
   }
-
   void _showSyncInProgress() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Syncing pending attendances...'),
-        duration: Duration(seconds: 2),
+        content: Text('Sending pending attendances...'),
+        duration: Duration(seconds: 5),
       ),
     );
   }
@@ -634,7 +641,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
             await apiService.processPendingSyncs();
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('✅ Saved online! All good!')),
+                SnackBar(content: Text('✅ Attendance sent successfully, ${record.userId}!'),
+                duration: const Duration(seconds: 5),
+              )
               );
               Navigator.pushAndRemoveUntil(
                 context,
@@ -657,8 +666,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       await _saveAttendanceLocally(record);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('📱 Saved on your device (will send to cloud later)'),
+           SnackBar(
+            content: Text('${record.userId},Your today attendance saved on your device for now.will send to admin later'),
+            duration: const Duration(seconds: 7)
           ),
         );
          Navigator.pushAndRemoveUntil(
