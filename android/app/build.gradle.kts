@@ -41,6 +41,8 @@ android {
 dependencies {
     // Use the full TensorFlow Lite package with GPU included
     implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
+    implementation("com.google.android.material:material:1.10.0")
+
     
     // Add these additional keep rules for the GPU delegate
     implementation("org.tensorflow:tensorflow-lite-gpu-delegate-plugin:0.4.4") {

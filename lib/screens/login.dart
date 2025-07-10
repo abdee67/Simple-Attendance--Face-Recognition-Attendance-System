@@ -222,7 +222,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                               ),
                               const SizedBox(height: 16),
                               Text(
-                                'Attendance Management',
+                                'Savvy Attendance',
                                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                                       fontWeight: FontWeight.bold,
                                       color: Colors.blue.shade800,

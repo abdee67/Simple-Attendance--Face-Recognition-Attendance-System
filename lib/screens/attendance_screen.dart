@@ -58,7 +58,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   bool isDetecting = false;
   // BlazeFace model parameters
   static const int INPUT_SIZE = 128; // Model input size
-  static const double THRESHOLD = 0.7; // Confidence threshold
+  static const double THRESHOLD = 0.8; // Confidence threshold
   static const int NUM_RESULTS = 6;
   static const String modelPath = 'assets/face_detection_front.tflite';
   late Float32List _inputBuffer;
@@ -524,7 +524,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   void _handlePreviewAccept() {
     setState(() {
       _showPreview = false;
-      _statusMessage = 'Acquiring location...';
+      _statusMessage = 'Photo Accepted! Finding location...';
     });
     _getCurrentLocation();
   }
@@ -747,7 +747,7 @@ Future<File> _createPermanentCopy(String tempPath) async {
 
   Widget _buildBackButton() {
     return Positioned(
-      top: 50,
+      top: 40,
       left: 20,
       child: CircleAvatar(
         backgroundColor: Colors.black54,
@@ -777,12 +777,17 @@ Future<File> _createPermanentCopy(String tempPath) async {
 
   @override
   Widget build(BuildContext context) {
+        // Check orientation for potential layout adjustments (e.g., in a complex layout)
+    final isPortrait = MediaQuery.of(context).orientation == Orientation.portrait;
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
           if (_isCameraInitialized)
-            CameraPreview(_cameraController, key: ValueKey<bool>(_showPreview)),
+        
+           CameraPreview(_cameraController, key: ValueKey<bool>(_showPreview)),
+          
           if (_isFaceDetected && _detectedRect != null)
             Positioned.fill(
               child: CustomPaint(
@@ -838,7 +843,7 @@ Future<File> _createPermanentCopy(String tempPath) async {
           // Status message (always visible unless preview is showing)
           if (!_showPreview)
             Positioned(
-              bottom: 100,
+              bottom: isPortrait ? 100 : 50, // Adjust based on orientation
               left: 20,
               right: 20,
               child: AnimatedSwitcher(
@@ -847,9 +852,9 @@ Future<File> _createPermanentCopy(String tempPath) async {
                   _statusMessage,
                   key: ValueKey<String>(_statusMessage),
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
+                    fontSize: isPortrait ? 18 : 16, // Responsive font size
                     fontWeight: FontWeight.w500,
                     shadows: [
                       Shadow(
@@ -869,7 +874,7 @@ Future<File> _createPermanentCopy(String tempPath) async {
               !_isFaceDetected &&
               !_showPreview)
             Positioned(
-              bottom: 160,
+              bottom: isPortrait ? 160 : 100, // Adjust based on orientation
               left: 0,
               right: 0,
               child: Center(
@@ -883,7 +888,7 @@ Future<File> _createPermanentCopy(String tempPath) async {
           // Manual retry button (only when error and not preview)
           if (_showError && !_showPreview)
             Positioned(
-              bottom: 40,
+              bottom: isPortrait ? 40 : 20, // Adjust based on orientation
               left: 0,
               right: 0,
               child: Center(
@@ -903,6 +908,13 @@ Future<File> _createPermanentCopy(String tempPath) async {
                   ),
                   onPressed: () {
                     setState(() => _showError = false);
+                    _captureAttempts = 0;
+                    _faceDetectionProgress = 0.0;
+                    _isFaceDetected = false;
+                    _detectedRect = null;
+                    _statusMessage = 'Align your face within the screen';
+                    _resetCaptureProcess();
+                    _startCaptureTimer();
                   },
                 ),
               ),
@@ -917,7 +929,7 @@ Future<File> _createPermanentCopy(String tempPath) async {
 
   Widget _buildPreviewOverlay() {
     return Container(
-      color: Colors.black,
+      color: Colors.black.withOpacity(0.9),
       child: Stack(
         children: [
           // Preview image
@@ -926,8 +938,11 @@ Future<File> _createPermanentCopy(String tempPath) async {
               constraints: BoxConstraints(
                 maxWidth: MediaQuery.of(context).size.width * 0.9,
                 maxHeight: MediaQuery.of(context).size.height * 0.7,
+             ),
+              child: FittedBox(
+                fit: BoxFit.contain,
+                child: Image.file(File(_capturedImagePath!)),
               ),
-              child: Image.file(File(_capturedImagePath!), fit: BoxFit.contain),
             ),
           ),
           // Accept/Reject buttons
@@ -987,7 +1002,7 @@ Future<File> _createPermanentCopy(String tempPath) async {
                 'REVIEW YOUR PHOTO',
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: 22,
+                  fontSize:MediaQuery.of(context).size.width > 600 ? 28 : 22, // Responsive font size
                   fontWeight: FontWeight.bold,
                   shadows: [
                     Shadow(
@@ -1003,7 +1018,7 @@ Future<File> _createPermanentCopy(String tempPath) async {
 
           // Preview instructions
           Positioned(
-            top: 100,
+            top: 80,
             left: 0,
             right: 0,
             child: Center(
@@ -1011,7 +1026,8 @@ Future<File> _createPermanentCopy(String tempPath) async {
                 'Make sure your face is clear and centered',
                 style: TextStyle(
                   color: Colors.white70,
-                  fontSize: 16,
+                  fontSize:MediaQuery.of(context).size.width > 600 ? 18 : 16, // Responsive font size
+                  fontWeight: FontWeight.w500,
                   shadows: [
                     Shadow(
                       blurRadius: 10.0,
