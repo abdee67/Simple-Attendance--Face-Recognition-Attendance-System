@@ -49,10 +49,23 @@ dependencies:
   image: ^4.5.4
   provider: ^6.1.5
   tflite_flutter: ^0.11.0
+  flutter_native_splash: ^2.4.6
+
   
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.14.4
+
+flutter_icons:
+  android: true
+  ios: true
+  remove_alpha_ios: false
+  adaptive_icon_background: "#00000000" # background color for adaptive icons
+  adaptive_icon_foreground: "assets/icon/foreground.png" # your icon file
+  image_path: "assets/icon/app_icon.png" # your icon file
+
+
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

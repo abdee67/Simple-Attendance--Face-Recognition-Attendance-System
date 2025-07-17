@@ -139,7 +139,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     } catch (e) {
-      debugPrint('Error resetting address table: $e');
+      _showError('Failed to reset and sync addresses: ${e.toString()}');
       rethrow;
     }
   }

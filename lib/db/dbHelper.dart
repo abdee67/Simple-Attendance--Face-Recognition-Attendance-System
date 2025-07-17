@@ -29,8 +29,6 @@ class DatabaseHelper {
         await db.execute("PRAGMA foreign_keys = ON");
       },
       onCreate: (db, version) async {
-        print("📦 Creating tables...");
-
         await db.execute('''
         CREATE TABLE users (
          id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,22 +49,17 @@ class DatabaseHelper {
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
 )
  ''');
-        print("✅ All tables created.");
       },
       // ✅ This is important for upgrading existing apps
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 1) {
-          print("⚙️ Upgrading DB from version $oldVersion to $newVersion...");
-
-          print("✅ pending_syncs table added.");
         }
       },
       onOpen: (db) async {
         await db.execute("PRAGMA foreign_keys = ON");
-        final tables = await db.rawQuery(
+        await db.rawQuery(
           'SELECT name FROM sqlite_master WHERE type="table"',
         );
-        print('📋 Tables in database: $tables');
       },
     );
   }

@@ -37,6 +37,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   bool _isSubmitting = false;
   String? _capturedImagePath;
   String _statusMessage = 'Initializing camera...';
+  int _retryCount = 0;
+  final int _maxRetries = 3;
+  bool _showRetryButton = false;
   Position? _currentPosition;
   final int _pendingSubmissions = 0;
   final db = AttendancedbMethods.instance;
@@ -121,39 +124,44 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       try {
         File(_capturedImagePath!).delete();
       } catch (e) {
-        if (kDebugMode) print("Error deleting temp file: $e");
+        if (kDebugMode) {}
       }
     }
     super.dispose();
   }
-    void _setupConnectivityListener() {
-    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((result) {
+
+  void _setupConnectivityListener() {
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((
+      result,
+    ) {
       if (result != ConnectivityResult.none) {
         _initSync();
       }
     });
   }
 
-    Future<void> _initSync() async {
+  Future<void> _initSync() async {
     // Wait a bit to let the UI initialize
     await Future.delayed(const Duration(milliseconds: 500));
-    
+
     // Check for pending sync
     final pendingCount = await db.getPendingAttendances();
-    
+
     if (pendingCount.isNotEmpty) {
       _showSyncInProgress();
       await ApiService().processPendingSyncs();
-         if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                 SnackBar(content: Text('✅ Unsent attendances are sent to admin! All good!'),
-                 duration: const Duration(seconds: 5),
-                 ),
-              );
-            }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Unsent attendances are sent to admin! All good!'),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
       _hideSyncInProgress();
     }
   }
+
   void _showSyncInProgress() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -207,7 +215,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         File(_capturedImagePath!).delete();
         _capturedImagePath = null;
       } catch (e) {
-        if (kDebugMode) print("Error cleaning up: $e");
+        if (kDebugMode) {}
       }
     }
 
@@ -254,19 +262,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       _interpreter.allocateTensors();
       // Verify input/output tensors
       final inputTensor = _interpreter.getInputTensor(0);
-
-      if (kDebugMode) {
-        print('Input shape: ${_interpreter.getInputTensor(0).shape}');
-        final outputs = _interpreter.getOutputTensors();
-        for (final out in outputs) {
-          print('Output ${out.name}: ${out.shape}');
-        }
-      }
-
       // Pre-allocate buffers based on model shape
       final inputShape = inputTensor.shape;
       _inputBuffer = Float32List(inputShape[1] * inputShape[2] * inputShape[3]);
-
     } catch (e) {
       setState(() => _statusMessage = 'Failed to load model: $e');
       throw Exception('Model loading failed: $e');
@@ -371,17 +369,6 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         1,
         (_) => List.generate(896, (_) => List.filled(1, 0.0)),
       );
-
-      final outputTensor0 = _interpreter.getOutputTensor(0);
-      final outputTensor1 = _interpreter.getOutputTensor(1);
-
-      print(
-        'Output 0: name=${outputTensor0.name}, shape=${outputTensor0.shape}',
-      );
-      print(
-        'Output 1: name=${outputTensor1.name}, shape=${outputTensor1.shape}',
-      );
-
       final outputs = <int, Object>{0: outputBoxes, 1: outputScores};
       _interpreter.runForMultipleInputs([reshapedInput], outputs);
 
@@ -399,9 +386,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           bestIndex = i;
         }
       }
-
       if (bestIndex == -1) {
-        print("❌ No face detected above threshold.");
         return;
       }
 
@@ -424,21 +409,16 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       final double xMax = (xCenter + w / 2).clamp(0.0, 1.0);
       final double yMax = (yCenter + h / 2).clamp(0.0, 1.0);
 
-      print("✅ Decoded Box: $xMin, $yMin → $xMax, $yMax");
-
       final faceRect = Rect.fromLTRB(xMin, yMin, xMax, yMax);
       _captureFace(faceRect);
 
       setState(() {
         _isFaceDetected = true;
         _detectedRect = faceRect;
-        print("Detected box: $xMin, $yMin → $xMax, $yMax");
       });
     } catch (e, stack) {
-      print("❌ Error processing camera image: $e");
-      print(stack);
       setState(() {
-        _statusMessage = 'Error processing image. Try again.';
+        _statusMessage = 'Error processing image. Try again.$stack';
         _isFaceDetected = false;
       });
     }
@@ -485,11 +465,6 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       final int clampedY = cropY.clamp(0, imageHeight - 1);
       final int clampedWidth = cropWidth.clamp(1, imageWidth - clampedX);
       final int clampedHeight = cropHeight.clamp(1, imageHeight - clampedY);
-
-      print(
-        "✅ Cropping: x=$clampedX, y=$clampedY, w=$clampedWidth, h=$clampedHeight",
-      );
-
       final img.Image croppedFace = img.copyCrop(
         originalImage,
         x: clampedX,
@@ -497,9 +472,6 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         width: clampedWidth,
         height: clampedHeight,
       );
-
-      print("Final Crop Box: ($cropX, $cropY, $cropWidth, $cropHeight)");
-
       final Directory tempDir = await getTemporaryDirectory();
       final String filePath =
           '${tempDir.path}/face_${DateTime.now().millisecondsSinceEpoch}.jpg';
@@ -512,9 +484,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         _statusMessage = 'Face captured successfully';
       });
     } catch (e, stack) {
-      print("❌ Face capture error: $e");
-      print(stack);
-      setState(() => _statusMessage = 'Capture failed. Try again.');
+      setState(() => _statusMessage = 'Capture failed. Try again.$stack');
       _resetCaptureProcess();
     } finally {
       _isCapturing = false;
@@ -524,7 +494,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   void _handlePreviewAccept() {
     setState(() {
       _showPreview = false;
-      _statusMessage = 'Photo Accepted! Finding location...';
+      _statusMessage = 'Photo Accepted!...Finding location...';
     });
     _getCurrentLocation();
   }
@@ -549,6 +519,10 @@ class _AttendanceScreenState extends State<AttendanceScreen>
 
   Future<void> _getCurrentLocation() async {
     try {
+      setState(() {
+        _statusMessage = 'Checking location service...';
+        _showRetryButton = false;
+      });
       // Check if location service is enabled
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
@@ -557,24 +531,23 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           () => _statusMessage = 'Please enable Location Services in Settings',
         );
         // Wait and check again in a loop
-        bool isEnabled = false;
         for (int i = 0; i < 15; i++) {
-          // Check for up to 30 seconds
+          // Check for up to 15 seconds
           await Future.delayed(const Duration(seconds: 1));
-          isEnabled = await Geolocator.isLocationServiceEnabled();
-          if (isEnabled){
-            setState(() 
-              => _statusMessage = 'Location Enabled! Continueing...');
-              await Future.delayed(const Duration(seconds: 1));
-            }
-       setState(() => _statusMessage = 'Enable location... (${15 - i}s remaining)');
-      }
-
-        if (!isEnabled) {
-          throw Exception('Location services still disabled after waiting');
+          serviceEnabled = await Geolocator.isLocationServiceEnabled();
+          if (serviceEnabled) {
+        
+            setState(() => _statusMessage = 'Location Enabled! Continuing...');
+            await Future.delayed(const Duration(seconds: 1));
+            break;
+          } else {
+            setState(
+              () =>
+                  _statusMessage = 'Enable location... (${15 - i}s remaining)',
+            );
+          }
         }
       }
-
       // Check and request permission
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
@@ -593,7 +566,6 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         );
         throw Exception('Location permissions permanently denied');
       }
-
       // Get current position
       final position = await Geolocator.getCurrentPosition(
         // ignore: deprecated_member_use
@@ -608,10 +580,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       await _submitAttendance();
     } catch (e) {
       setState(() => _statusMessage = 'Location error: ${e.toString()}');
-      // Optionally retry after delay
-      await Future.delayed(const Duration(seconds: 2));
-      _getCurrentLocation(); // Retry automatically
+      _showRetryButton = true;
     }
+    ;
   }
 
   Future<void> _submitAttendance() async {
@@ -623,7 +594,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     try {
       final isOnline =
           await Connectivity().checkConnectivity() != ConnectivityResult.none;
-          final permanentFile = await _createPermanentCopy(_capturedImagePath!);
+      final permanentFile = await _createPermanentCopy(_capturedImagePath!);
       final apiService = ApiService();
 
       final record = AttendanceRecord(
@@ -641,9 +612,12 @@ class _AttendanceScreenState extends State<AttendanceScreen>
             await apiService.processPendingSyncs();
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('✅ Attendance sent successfully, ${record.userId}!'),
-                duration: const Duration(seconds: 5),
-              )
+                SnackBar(
+                  content: Text(
+                    '✅ Attendance sent successfully, ${record.userId}!',
+                  ),
+                  duration: const Duration(seconds: 5),
+                ),
               );
               Navigator.pushAndRemoveUntil(
                 context,
@@ -655,29 +629,33 @@ class _AttendanceScreenState extends State<AttendanceScreen>
             }
             return;
           } else {
-            debugPrint('❌ API returned error status: \\${response.statusCode}');
-            debugPrint('❌ API error body: \\${response.body}');
+            setState(
+              () =>
+                  _statusMessage =
+                      'Failed to submit attendance: ${response.statusCode}',
+            );
           }
         } catch (e, stackTrace) {
-          debugPrint('Sync failed: \\${e.toString()}');
-          debugPrintStack(stackTrace: stackTrace);
+          setState(() => _statusMessage = 'Submission error: $e\n$stackTrace');
         }
       }
       await _saveAttendanceLocally(record);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-           SnackBar(
-            content: Text('${record.userId},Your today attendance saved on your device for now.will send to admin later'),
-            duration: const Duration(seconds: 7)
+          SnackBar(
+            content: Text(
+              '${record.userId},Your today attendance saved on your device for now.will send to admin later',
+            ),
+            duration: const Duration(seconds: 7),
           ),
         );
-         Navigator.pushAndRemoveUntil(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => LoginScreen(apiService: apiService),
-                ),
-                (Route<dynamic> route) => false,
-              );
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(
+            builder: (context) => LoginScreen(apiService: apiService),
+          ),
+          (Route<dynamic> route) => false,
+        );
       }
     } catch (e) {
       String errorMessage = 'Submission error';
@@ -694,28 +672,14 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         _isSubmitting = false;
       });
     }
-    // In _submitAttendance():
-    if (kDebugMode) {
-      final file = File(_capturedImagePath!);
-      final size = await file.length();
-      print('Sending cropped face image: ${file.path}');
-      print('Image size: $size bytes');
-      print('Image dimensions: ${await _getImageDimensions(file)}');
-    }
   }
-Future<File> _createPermanentCopy(String tempPath) async {
-  final tempFile = File(tempPath);
-  final permanentDir = await getApplicationDocumentsDirectory();
-  final permanentPath = '${permanentDir.path}/attendance_${DateTime.now().millisecondsSinceEpoch}.jpg';
-  return await tempFile.copy(permanentPath);
-}
-  // Helper function:
-  Future<String> _getImageDimensions(File file) async {
-    final image = await _cameraController.takePicture();
-    final bytes = await File(image.path).readAsBytes();
-    final decoded = img.decodeImage(bytes)!;
-    // Process with TFLite
-    return '${decoded.width}x${decoded.height}';
+
+  Future<File> _createPermanentCopy(String tempPath) async {
+    final tempFile = File(tempPath);
+    final permanentDir = await getApplicationDocumentsDirectory();
+    final permanentPath =
+        '${permanentDir.path}/attendance_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    return await tempFile.copy(permanentPath);
   }
 
   Future<void> _saveAttendanceLocally(AttendanceRecord record) async {
@@ -753,7 +717,8 @@ Future<File> _createPermanentCopy(String tempPath) async {
         backgroundColor: Colors.black54,
         child: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () =>  Navigator.pushAndRemoveUntil(
+          onPressed:
+              () => Navigator.pushAndRemoveUntil(
                 context,
                 MaterialPageRoute(
                   builder: (context) => LoginScreen(apiService: apiService),
@@ -777,17 +742,17 @@ Future<File> _createPermanentCopy(String tempPath) async {
 
   @override
   Widget build(BuildContext context) {
-        // Check orientation for potential layout adjustments (e.g., in a complex layout)
-    final isPortrait = MediaQuery.of(context).orientation == Orientation.portrait;
+    // Check orientation for potential layout adjustments (e.g., in a complex layout)
+    final isPortrait =
+        MediaQuery.of(context).orientation == Orientation.portrait;
 
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
           if (_isCameraInitialized)
-        
-           CameraPreview(_cameraController, key: ValueKey<bool>(_showPreview)),
-          
+            CameraPreview(_cameraController, key: ValueKey<bool>(_showPreview)),
+
           if (_isFaceDetected && _detectedRect != null)
             Positioned.fill(
               child: CustomPaint(
@@ -870,20 +835,20 @@ Future<File> _createPermanentCopy(String tempPath) async {
 
           // Attempt counter (only when not showing preview)
           if (!_showPreview)
-          if (_captureAttempts >= maxCaptureAttempts &&
-              !_isFaceDetected &&
-              !_showPreview)
-            Positioned(
-              bottom: isPortrait ? 160 : 100, // Adjust based on orientation
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Text(
-                  'We couldn\'t detect your face. Try better lighting.',
-                  style: TextStyle(color: Colors.redAccent, fontSize: 16),
+            if (_captureAttempts >= maxCaptureAttempts &&
+                !_isFaceDetected &&
+                !_showPreview)
+              Positioned(
+                bottom: isPortrait ? 160 : 100, // Adjust based on orientation
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Text(
+                    'We couldn\'t detect your face. Try better lighting.',
+                    style: TextStyle(color: Colors.redAccent, fontSize: 16),
+                  ),
                 ),
               ),
-            ),
 
           // Manual retry button (only when error and not preview)
           if (_showError && !_showPreview)
@@ -919,7 +884,27 @@ Future<File> _createPermanentCopy(String tempPath) async {
                 ),
               ),
             ),
-
+          // Status message and retry button (always visible at the bottom, above control buttons)
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(_statusMessage, textAlign: TextAlign.center),
+                const SizedBox(height: 12),
+                if (_showRetryButton)
+                  ElevatedButton(
+                    onPressed: () {
+                      _retryCount = 0;
+                      _getCurrentLocation();
+                    },
+                    child: const Text('Try Again'),
+                  ),
+              ],
+            ),
+          ),
           // Control buttons (always visible unless preview is showing)
           if (!_showPreview) ...[_buildBackButton(), _buildTorchButton()],
         ],
@@ -938,7 +923,7 @@ Future<File> _createPermanentCopy(String tempPath) async {
               constraints: BoxConstraints(
                 maxWidth: MediaQuery.of(context).size.width * 0.9,
                 maxHeight: MediaQuery.of(context).size.height * 0.7,
-             ),
+              ),
               child: FittedBox(
                 fit: BoxFit.contain,
                 child: Image.file(File(_capturedImagePath!)),
@@ -1002,7 +987,10 @@ Future<File> _createPermanentCopy(String tempPath) async {
                 'REVIEW YOUR PHOTO',
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize:MediaQuery.of(context).size.width > 600 ? 28 : 22, // Responsive font size
+                  fontSize:
+                      MediaQuery.of(context).size.width > 600
+                          ? 28
+                          : 22, // Responsive font size
                   fontWeight: FontWeight.bold,
                   shadows: [
                     Shadow(
@@ -1026,7 +1014,10 @@ Future<File> _createPermanentCopy(String tempPath) async {
                 'Make sure your face is clear and centered',
                 style: TextStyle(
                   color: Colors.white70,
-                  fontSize:MediaQuery.of(context).size.width > 600 ? 18 : 16, // Responsive font size
+                  fontSize:
+                      MediaQuery.of(context).size.width > 600
+                          ? 18
+                          : 16, // Responsive font size
                   fontWeight: FontWeight.w500,
                   shadows: [
                     Shadow(

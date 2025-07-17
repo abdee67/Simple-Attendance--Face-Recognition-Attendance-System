@@ -1,5 +1,3 @@
-import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -63,13 +61,8 @@ static Future<Float32List> getFaceEmbedding(String imagePath) async {
     if (normalized.length != 128) {
       throw Exception('Invalid embedding length: ${normalized.length}');
     }
-
-    debugPrint('Embedding type: ${normalized.runtimeType}');
-    debugPrint('First 5 values: ${normalized.sublist(0, 5)}');
-
     return normalized;
   } catch (e) {
-    debugPrint('Inference error: $e');
     rethrow;
   }
 }
@@ -122,7 +115,6 @@ static Future<Float32List> getFaceEmbedding(String imagePath) async {
     if (isOnline) {
       try {
         await apiService.postAttendanceBatch(records);
-        debugPrint('Attendance submitted successfully');
       } catch (e) {
         // Fallback to local storage
         await _saveToLocal(records);
@@ -145,10 +137,6 @@ static Future<Float32List> getFaceEmbedding(String imagePath) async {
     }
   }
   
-  Future<String> _imageToBase64(String imagePath) async {
-    final bytes = await File(imagePath).readAsBytes();
-    return base64Encode(bytes);
-  }
   
   Future<bool> checkConnectivity() async {
     try {
@@ -158,9 +146,6 @@ static Future<Float32List> getFaceEmbedding(String imagePath) async {
       return false;
     }
   }
-  
-  String _twoDigits(int n) => n.toString().padLeft(2, '0');
-
   // 7. Update pending records
 // face_service.dart
 Future<void> syncPendingRecords() async {

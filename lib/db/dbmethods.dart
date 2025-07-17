@@ -132,18 +132,4 @@ Future<void> saveFaceEmbedding(Float32List embedding) async {
     final db = await dbHelper.database;
     return await db.query('attendance');
   }
-
-  Future<void> printAllNozzles() async {
-    final nozzles = await getAllLocaion();
-
-    debugPrint('\n🔧 ALL attendance IN DATABASE (${nozzles.length} total)');
-    for (final nozzle in nozzles) {
-      debugPrint('├─  id : ${nozzle['id']}');
-     
-      // debugPrint('│   longitude : ${nozzle['longitude']}');
-      //debugPrint('│   threshold : ${nozzle['threshold']}');
-      debugPrint('│ full data : ${nozzle.toString()}');
-    }
-    debugPrint('└──────────────────────────────────');
-  }
 }

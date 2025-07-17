@@ -6,7 +6,6 @@ import 'package:simple_attendance/db/dbHelper.dart';
 
 import '/db/dbmethods.dart';
 import '/models/attendance.dart';
-import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -36,9 +35,6 @@ Future<Map<String, dynamic>> authenticateUser(String username, String password) 
         'password': password,
       }),
     ).timeout(const Duration(seconds: 120));
-
-    debugPrint('Login Response Code: ${response.statusCode}');
-    debugPrint('Login Response: ${response.body}');
 
     if (response.statusCode == 200) {
       final jsonData = jsonDecode(response.body);
@@ -108,7 +104,6 @@ Future<Map<String, dynamic>> authenticateUser(String username, String password) 
       'userMessage': 'System error: Please contact support',
     };
   } catch (e) {
-    debugPrint('API authentication failed: $e');
     return {
       'success': false,
       'error': e.toString(),
@@ -164,10 +159,18 @@ Future<Map<String, String>?> getStoredCredentials() async {
             where: 'id = ?',
             whereArgs: [record.id],
           );
-          debugPrint('✅ Successfully synced record ${record.id}');
         }
       } catch (e) {
-        debugPrint('Failed to sync record ${record.id}: $e');
+        String errorMessage;
+        if (e is ApiException) {
+          errorMessage = 'API error: ${e.message}';
+        } else if (e is SocketException) {
+          errorMessage = 'Network error: ${e.message}';
+        } else if (e is TimeoutException) {
+          errorMessage = 'Request timed out: ${e.message}';
+        } else {
+          errorMessage = 'Unexpected error: ${e.toString()}';
+        }
       }
     }
   }
@@ -199,22 +202,16 @@ Future<http.Response> postAttendanceBatch(
         lastResponse = response;
         // 3) Immediately return on success
         if (response.statusCode == 200) {
-          debugPrint('✅ Attendance batch submitted: ${response.body}');
           return response;
         }
-
         // 4) Log & prepare to retry
-        debugPrint('❌ Attendance batch failed (${response.statusCode}) → ${response.body}');
         lastError = ApiException('Status ${response.statusCode}', response.statusCode);
       } on TimeoutException catch (e) {
         lastError = e;
-        debugPrint('⏱️ Timeout on attendance post: $e');
       } on http.ClientException catch (e) {
         lastError = e;
-        debugPrint('🌐 Network error on attendance post: $e');
       } catch (e) {
         lastError = Exception('Unknown error: $e');
-        debugPrint('❌ Unexpected error on attendance post: $e');
       }
 
       // 5) Delay before next attempt (unless it was last)
