@@ -61,7 +61,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   bool isDetecting = false;
   // BlazeFace model parameters
   static const int INPUT_SIZE = 128; // Model input size
-  static const double THRESHOLD = 0.8; // Confidence threshold
+  static const double THRESHOLD = 0.7; // Confidence threshold
   static const int NUM_RESULTS = 6;
   static const String modelPath = 'assets/face_detection_front.tflite';
   late Float32List _inputBuffer;
@@ -496,7 +496,16 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       _showPreview = false;
       _statusMessage = 'Photo Accepted!...Finding location...';
     });
-    _getCurrentLocation();
+    if (Platform.isAndroid || Platform.isIOS) {
+      
+      _getCurrentLocation();
+    } else {
+      // For web or desktop, just submit attendance directly
+      setState(() {
+        _statusMessage = 'Location not required on this platform. Submitting...';
+      });
+      _submitAttendance();
+    }
   }
 
   void _handlePreviewReject() {
