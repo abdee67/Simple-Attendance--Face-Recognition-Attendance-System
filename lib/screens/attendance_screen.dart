@@ -16,7 +16,6 @@ import 'package:simple_attendance/models/attendance.dart';
 import 'package:simple_attendance/screens/login.dart';
 import 'package:simple_attendance/services/api_service.dart';
 import 'package:simple_attendance/utils/face_painter.dart';
-
 import 'package:tflite_flutter/tflite_flutter.dart';
 
 class AttendanceScreen extends StatefulWidget {
@@ -41,10 +40,8 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   final int _maxRetries = 3;
   bool _showRetryButton = false;
   Position? _currentPosition;
-  final int _pendingSubmissions = 0;
   final db = AttendancedbMethods.instance;
   int _frameCount = 0;
-  bool _isTorchOn = false;
   bool _showPreview = false;
   Rect? _detectedRect;
   late Interpreter _interpreter;
@@ -62,11 +59,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   // BlazeFace model parameters
   static const int INPUT_SIZE = 128; // Model input size
   static const double THRESHOLD = 0.7; // Confidence threshold
-  static const int NUM_RESULTS = 6;
   static const String modelPath = 'assets/face_detection_front.tflite';
   late Float32List _inputBuffer;
   late List<List<List<double>>> _outputLocations;
-  late List<List<double>> _outputScores;
   late final List<List<double>> _blazeFaceAnchors;
   StreamSubscription? _connectivitySubscription;
   final ApiService apiService = ApiService();
@@ -100,7 +95,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
 
       // Similarly for other outputs
     });
-    _initializeCamera();
+    _initializeDesktopCamera();
     // Setup animations
     _animationController = AnimationController(
       vsync: this,
@@ -224,35 +219,31 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     setState(() => _statusMessage = 'Align your face within the screen');
   }
 
-  Future<void> _initializeCamera() async {
-    try {
-      final cameras = await availableCameras();
-      final frontCamera = cameras.firstWhere(
-        (camera) => camera.lensDirection == CameraLensDirection.front,
-        orElse: () => cameras.first,
-      );
-
-      _cameraController = CameraController(
-        frontCamera,
-        ResolutionPreset.high,
-        enableAudio: false,
-        imageFormatGroup:
-            Platform.isAndroid
-                ? ImageFormatGroup.yuv420
-                : ImageFormatGroup.bgra8888,
-      );
-
-      await _cameraController.initialize();
-      _cameraController.startImageStream(_processCameraImage);
-
-      setState(() {
-        _isCameraInitialized = true;
-        _statusMessage = 'Align your face within the screen';
-      });
-    } catch (e) {
-      setState(() => _statusMessage = 'Camera error: $e');
+ Future<void> _initializeDesktopCamera() async {
+  try {
+    // Desktop cameras might need different handling
+    final cameras = await availableCameras();
+    if (cameras.isEmpty) {
+      throw Exception('No camera detected');
     }
+
+    _cameraController = CameraController(
+      cameras.first,
+      ResolutionPreset.high,
+      enableAudio: false,
+    );
+
+    await _cameraController.initialize();
+    _cameraController.startImageStream(_processCameraImage);
+    setState(() {
+      _isCameraInitialized = true;
+      _statusMessage = 'Camera initialized successfully';
+    });
+  } catch (e) {
+    setState(() => _statusMessage = 'Failed to initialize Desktop camera: $e');
+    throw Exception('Camera initialization failed: $e');
   }
+}
 
   // 1. First, update your model loading with proper verification
   Future<void> _loadModel() async {
@@ -496,16 +487,8 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       _showPreview = false;
       _statusMessage = 'Photo Accepted!...Finding location...';
     });
-    if (Platform.isAndroid || Platform.isIOS) {
-      
-      _getCurrentLocation();
-    } else {
-      // For web or desktop, just submit attendance directly
-      setState(() {
-        _statusMessage = 'Location not required on this platform. Submitting...';
-      });
-      _submitAttendance();
-    }
+    _getCurrentLocation();
+    _submitAttendance();
   }
 
   void _handlePreviewReject() {
@@ -701,22 +684,6 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     );
   }
 
-  Widget _buildTorchButton() {
-    return Positioned(
-      top: 50,
-      right: 20,
-      child: CircleAvatar(
-        backgroundColor: Colors.black54,
-        child: IconButton(
-          icon: Icon(
-            _isTorchOn ? Icons.flash_on : Icons.flash_off,
-            color: Colors.white,
-          ),
-          onPressed: _toggleTorch,
-        ),
-      ),
-    );
-  }
 
   Widget _buildBackButton() {
     return Positioned(
@@ -739,21 +706,13 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     );
   }
 
-  void _toggleTorch() async {
-    if (_cameraController.value.flashMode == FlashMode.torch) {
-      await _cameraController.setFlashMode(FlashMode.off);
-      setState(() => _isTorchOn = false);
-    } else {
-      await _cameraController.setFlashMode(FlashMode.torch);
-      setState(() => _isTorchOn = true);
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
     // Check orientation for potential layout adjustments (e.g., in a complex layout)
     final isPortrait =
         MediaQuery.of(context).orientation == Orientation.portrait;
+    final isSmallScreen = MediaQuery.of(context).size.width < 600;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -790,7 +749,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
 
           // Preview overlay (on top of everything else when active)
           if (_showPreview && _capturedImagePath != null)
-            _buildPreviewOverlay(),
+            _buildPreviewOverlay(isSmallScreen),
 
           // Success overlay
           if (_showSuccess)
@@ -915,13 +874,13 @@ class _AttendanceScreenState extends State<AttendanceScreen>
             ),
           ),
           // Control buttons (always visible unless preview is showing)
-          if (!_showPreview) ...[_buildBackButton(), _buildTorchButton()],
+          if (!_showPreview) ...[_buildBackButton()],
         ],
       ),
     );
   }
 
-  Widget _buildPreviewOverlay() {
+  Widget _buildPreviewOverlay(isSmallScreen) {
     return Container(
       color: Colors.black.withOpacity(0.9),
       child: Stack(

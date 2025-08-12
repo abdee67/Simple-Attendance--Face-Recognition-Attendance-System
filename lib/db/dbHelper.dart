@@ -60,6 +60,11 @@ class DatabaseHelper {
         await db.rawQuery(
           'SELECT name FROM sqlite_master WHERE type="table"',
         );
+        print('All created tables:');
+        final tables = await db.rawQuery(
+          'SELECT name FROM sqlite_master WHERE type="table"',
+          
+        );
       },
     );
   }

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart' as LocationService;
 import '/services/face_service.dart';
 import '/db/dbmethods.dart';
@@ -25,13 +24,9 @@ void main() async {
   }
   final apiService = ApiService();
   final database = AttendancedbMethods.instance;
-  
-  SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
   await FaceService.init();
   await apiService.processPendingSyncs();
+  
 
 
   runApp(

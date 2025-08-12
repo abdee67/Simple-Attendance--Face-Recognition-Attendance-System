@@ -11,4 +11,19 @@
       <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
     </application>
   </compatibility>
+  <application xmlns:windows="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+             xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+             xmlns:uap2="http://schemas.microsoft.com/appx/manifest/uap/windows10/2"
+             xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+
+  <uap:VisualElements DisplayName="Savvy Attendance" Description="Face recognition attendance system"
+                      BackgroundColor="transparent" Square150x150Logo="resources\app_icon.ico" />
+
+  <!-- ✅ Camera permission -->
+  <uap:Capability Name="webcam" />
+
+  <!-- ✅ Location permission -->
+  <uap:Capability Name="location" />
+</application>
+
 </assembly>
