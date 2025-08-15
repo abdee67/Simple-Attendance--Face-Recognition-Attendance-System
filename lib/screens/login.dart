@@ -14,7 +14,8 @@ class LoginScreen extends StatefulWidget {
   _LoginScreenState createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
+class _LoginScreenState extends State<LoginScreen>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
@@ -24,26 +25,23 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   bool _obscurePassword = true;
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
-  late Animation<double> _scaleAnimation;
+  late Animation<Offset> _slideAnimation;
 
   @override
   void initState() {
     super.initState();
     _animationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 800),
     );
     _fadeAnimation = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: Curves.easeInOut,
-      ),
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
-    _scaleAnimation = Tween<double>(begin: 0.8, end: 1).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: Curves.elasticOut,
-      ),
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.1),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOutQuart),
     );
     _animationController.forward();
   }
@@ -58,86 +56,143 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
-    
+
     setState(() => _isLoading = true);
-    final connectivityResult = await Connectivity().checkConnectivity();
-    final isOnline = connectivityResult != ConnectivityResult.none;
-    final username = _usernameController.text;
-    final password = _passwordController.text;
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text.trim();
 
     try {
-      // Check if user exists in local DB
+      // 1. Check connectivity with timeout
+      bool isOnline;
+      try {
+        final connectivityResult = await Connectivity()
+            .checkConnectivity()
+            .timeout(const Duration(seconds: 3));
+        isOnline = connectivityResult != ConnectivityResult.none;
+      } catch (e) {
+        isOnline = false;
+        debugPrint('Connectivity check failed, assuming offline: $e');
+      }
+
+      // 2. Check if user exists in local DB
       final userExists = await dbmethods.checkUserExists(username);
 
-      if (isOnline) {
-        if (userExists) {
-          // Online + existing user: validate locally
-          final isValid = await dbmethods.validateUser(username, password);
-          if (isValid) {
-            _navigateToHome();
-          } else {
-            _showError('Invalid username or password!');
-          }
+      if (!isOnline) {
+        // OFFLINE FLOW
+        if (!userExists) {
+          _showError('First login requires internet connection');
+          return;
+        }
+
+        // Validate against local database
+        final isValid = await dbmethods.validateUser(username, password);
+        if (isValid) {
+          _navigateToHome();
         } else {
-          // Online + new user: authenticate via API
-          final result = await widget.apiService.authenticateUser(username, password);
-          if (result['success'] == true) {
-            // Save to local DB
-            final userId = result['userId'] as String?;
+          _showError(
+            'Invalid credentials - please connect to internet to verify',
+          );
+        }
+        return;
+      }
+
+      // ONLINE FLOW
+      try {
+        final apiResult = await widget.apiService
+            .authenticateUser(username, password)
+            .timeout(const Duration(seconds: 10));
+
+        if (apiResult['success'] == true) {
+          // Handle successful API authentication
+          final userId = apiResult['userId']?.toString() ?? username;
+
+          if (userExists) {
+            // Check if password needs updating
+            final localPassword = await dbmethods.getUserPassword(username);
+            if (localPassword != password) {
+              await dbmethods.updatePassword(userId, password);
+              _showSuccess('Credentials updated');
+            }
+          } else {
+            // New user - save to local DB
             await dbmethods.insertUser(username, password, userId: userId);
-            // RESET ADDRESS TABLE ONLY FOR FIRST-TIME LOGIN
-            if (result['latitude'] != null && result['longitude'] != null) {
-    await _resetAndSyncAddresses(result); // Pass the entire result
-  }
-            _navigateToHome();
-          } else {
-            _showError(result['error']);
+            _showSuccess('Welcome! Account created');
           }
+
+          // Sync location data if available
+          if (apiResult['latitude'] != null && apiResult['longitude'] != null) {
+            await _resetAndSyncAddresses(apiResult);
+          }
+
+          _navigateToHome();
+        } else {
+          // API authentication failed - try local fallback
+          if (userExists) {
+            final isValid = await dbmethods.validateUser(username, password);
+            if (isValid) {
+              _navigateToHome();
+              return;
+            }
+          }
+          _showError(apiResult['error']?.toString() ?? 'Authentication failed');
         }
-      } else {
+      } catch (apiError) {
+        // API call failed - try local fallback
+        debugPrint('API error: $apiError');
         if (userExists) {
-          // Offline + existing user: validate locally
           final isValid = await dbmethods.validateUser(username, password);
           if (isValid) {
             _navigateToHome();
-          } else {
-            _showError('Invalid username or password!');
+            return;
           }
-        } else {
-          // Offline + new user: not possible
-          _showError('No internet connection. First login requires internet');
         }
+        _showError('Connection unstable - try again or use offline mode');
       }
     } catch (e) {
-      _showError('Error: ${e.toString()}');
+      _showError(_getErrorMessage(e));
+      debugPrint('Login error: $e');
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  String _getErrorMessage(dynamic error) {
+    return error.toString().replaceFirst(
+      'Null check operator used on a null value',
+      'System error',
+    );
+  }
+
+  void _showSuccess(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _resetAndSyncAddresses(dynamic locationData) async {
     try {
       final database = await db.database;
       await database.delete('location');
-      
-        await database.insert(
-          'location',
-         {
-          'id': 1,
-          'threshold': (locationData['threshold'] is String)
-              ? double.tryParse(locationData['threshold']) ?? 0
-              : locationData['threshold'],
-          'latitude': (locationData['latitude'] is String)
-              ? double.tryParse(locationData['latitude']) ?? 0
-              : locationData['latitude'],
-          'longitude': (locationData['longitude'] is String)
-              ? double.tryParse(locationData['longitude']) ?? 0
-              : locationData['longitude'],
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+
+      await database.insert('location', {
+        'id': 1,
+        'threshold':
+            (locationData['threshold'] is String)
+                ? double.tryParse(locationData['threshold']) ?? 0
+                : locationData['threshold'],
+        'latitude':
+            (locationData['latitude'] is String)
+                ? double.tryParse(locationData['latitude']) ?? 0
+                : locationData['latitude'],
+        'longitude':
+            (locationData['longitude'] is String)
+                ? double.tryParse(locationData['longitude']) ?? 0
+                : locationData['longitude'],
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     } catch (e) {
       _showError('Failed to reset and sync addresses: ${e.toString()}');
       rethrow;
@@ -149,91 +204,110 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       SnackBar(
         content: Text(message),
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         backgroundColor: Colors.red.shade400,
       ),
     );
   }
 
   Future<void> _navigateToHome() async {
-  if (!mounted) return;
-  
-  
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (context) => AttendanceScreen(userId: _usernameController.text, )
-       
-    ),
-  );
-}
+    if (!mounted) return;
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder:
+            (context) => AttendanceScreen(userId: _usernameController.text),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final isDesktop = size.width > 600;
+
     return Scaffold(
-      body: AnimatedBuilder(
-        animation: _animationController,
-        builder: (context, child) {
-          return Opacity(
-            opacity: _fadeAnimation.value,
-            child: Transform.scale(
-              scale: _scaleAnimation.value,
-              child: child,
-            ),
-          );
-        },
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.blue.shade800,
-                Colors.blue.shade600,
-                Colors.blue.shade400,
-              ],
-            ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.blue.shade900,
+              Colors.blue.shade700,
+              Colors.blue.shade500,
+            ],
           ),
-          child: Center(
-            child: SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Card(
-                  elevation: 8,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(24.0),
-                    child: Form(
-                      key: _formKey,
+        ),
+        child: Center(
+          child: AnimatedBuilder(
+            animation: _animationController,
+            builder: (context, child) {
+              return Opacity(
+                opacity: _fadeAnimation.value,
+                child: SlideTransition(position: _slideAnimation, child: child),
+              );
+            },
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: isDesktop ? 500 : size.width * 0.9,
+              ),
+              child: Card(
+                elevation: 16,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.all(isDesktop ? 40.0 : 24.0),
+                  child: Form(
+                    key: _formKey,
+                    child: SingleChildScrollView(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           // Logo and Title
                           Column(
                             children: [
-                              const Icon(
-                                Icons.account_circle,
-                                size: 80,
-                                color: Colors.blue,
+                              Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.shade50,
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.blue.withOpacity(0.2),
+                                      blurRadius: 10,
+                                      spreadRadius: 2,
+                                    ),
+                                  ],
+                                ),
+                                child: Icon(
+                                  Icons.person_outline,
+                                  size: 48,
+                                  color: Colors.blue.shade800,
+                                ),
                               ),
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 24),
                               Text(
                                 'Savvy Attendance',
-                                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.blue.shade800,
-                                    ),
+                                style: Theme.of(
+                                  context,
+                                ).textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue.shade900,
+                                  fontSize: isDesktop ? 28 : 24,
+                                ),
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                'Sign in to continue',
-                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                      color: Colors.grey.shade600,
-                                    ),
+                                'Login To Your Account',
+                                style: Theme.of(
+                                  context,
+                                ).textTheme.bodyMedium?.copyWith(
+                                  color: Colors.grey.shade600,
+                                  fontSize: isDesktop ? 16 : 14,
+                                ),
                               ),
                             ],
                           ),
@@ -244,28 +318,43 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                             controller: _usernameController,
                             decoration: InputDecoration(
                               labelText: 'Username',
-                              prefixIcon: const Icon(Icons.person),
+                              prefixIcon: const Icon(Icons.person_outline),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(
+                                  color: Colors.grey.shade300,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(
+                                  color: Colors.grey.shade300,
+                                ),
                               ),
                               filled: true,
                               fillColor: Colors.grey.shade50,
+                              contentPadding: const EdgeInsets.symmetric(
+                                vertical: 16,
+                                horizontal: 16,
+                              ),
                             ),
-                            validator: (value) => value!.isEmpty ? 'Required' : null,
+                            validator:
+                                (value) => value!.isEmpty ? 'Required' : null,
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 20),
 
                           // Password Field
                           TextFormField(
                             controller: _passwordController,
                             decoration: InputDecoration(
                               labelText: 'Password',
-                              prefixIcon: const Icon(Icons.lock),
+                              prefixIcon: const Icon(Icons.lock_outline),
                               suffixIcon: IconButton(
                                 icon: Icon(
                                   _obscurePassword
-                                      ? Icons.visibility
-                                      : Icons.visibility_off,
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                  color: Colors.grey.shade600,
                                 ),
                                 onPressed: () {
                                   setState(() {
@@ -275,63 +364,109 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                               ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(
+                                  color: Colors.grey.shade300,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(
+                                  color: Colors.grey.shade300,
+                                ),
                               ),
                               filled: true,
                               fillColor: Colors.grey.shade50,
+                              contentPadding: const EdgeInsets.symmetric(
+                                vertical: 16,
+                                horizontal: 16,
+                              ),
                             ),
                             obscureText: _obscurePassword,
-                            validator: (value) => value!.isEmpty ? 'Required' : null,
+                            validator:
+                                (value) => value!.isEmpty ? 'Required' : null,
                           ),
+                          const SizedBox(height: 8),
+
+                          // Remember me + Forgot password (desktop only)
+                          if (isDesktop)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Checkbox(
+                                        value: true,
+                                        onChanged: (value) {},
+                                        materialTapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                        visualDensity: VisualDensity.compact,
+                                      ),
+                                      Text(
+                                        'Remember me',
+                                        style: TextStyle(
+                                          color: Colors.grey.shade600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  TextButton(
+                                    onPressed: () {},
+                                    child: Text(
+                                      'Forgot password?',
+                                      style: TextStyle(
+                                        color: Colors.blue.shade700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           const SizedBox(height: 24),
 
                           // Login Button
                           SizedBox(
                             width: double.infinity,
                             height: 50,
-                            child: _isLoading
-                                ? const Center(
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-                                    ),
-                                  )
-                                : ElevatedButton(
-                                    onPressed: _login,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.blue.shade800,
-                                      foregroundColor: Colors.white,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
+                            child:
+                                _isLoading
+                                    ? const Center(
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              Colors.blue,
+                                            ),
                                       ),
-                                      elevation: 4,
-                                      padding: const EdgeInsets.symmetric(vertical: 14),
-                                    ),
-                                    child: const Text(
-                                      'LOGIN',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
+                                    )
+                                    : ElevatedButton(
+                                      onPressed: _login,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.blue.shade800,
+                                        foregroundColor: Colors.white,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                        ),
+                                        elevation: 4,
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 14,
+                                        ),
+                                        shadowColor: Colors.blue.shade300,
+                                      ),
+                                      child: Text(
+                                        'Log iN',
+                                        style: TextStyle(
+                                          fontSize: isDesktop ? 16 : 14,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 1.2,
+                                        ),
                                       ),
                                     ),
-                                  ),
                           ),
-                          const SizedBox(height: 16),
-/** 
-                          // Forgot Password Link
-                          TextButton(
-                            onPressed: () {
-                             // Open forgot password URL
-                             // Make sure to add url_launcher to your pubspec.yaml and import it at the top
-                             // import 'package:url_launcher/url_launcher.dart';
-                             launchUrl(Uri.parse('https://demo.techequations.com/dover/signin.xhtml'), mode: LaunchMode.externalApplication);
-                            },
-                            child: Text(
-                              'Forgot Password?',
-                              style: TextStyle(
-                                color: Colors.blue.shade600,
-                              ),
-                            ),
-                          ),**/
                         ],
                       ),
                     ),

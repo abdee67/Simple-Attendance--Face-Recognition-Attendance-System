@@ -14,7 +14,6 @@ class AttendancedbMethods {
   AttendancedbMethods._internal();
   static AttendancedbMethods get instance => _instance;
 
-
   // Attendance CRUD
   Future<int> saveAttendance({
     required String userId,
@@ -35,27 +34,31 @@ class AttendancedbMethods {
     });
   }
 
-    Future<List<AttendanceRecord>> getPendingAttendances() async {
+  Future<List<AttendanceRecord>> getPendingAttendances() async {
     final db = await dbHelper.database;
     final maps = await db.query(
       'attendance',
-     where: 'is_synced = ?',
+      where: 'is_synced = ?',
       whereArgs: [0],
       orderBy: 'timestamp ASC',
     );
-        return maps.map((map) => AttendanceRecord(
-      id: map['id'] as int,
-      userId: map['userId'] as String,
-      timestamp: DateTime.parse(map['timestamp'] as String),
-      faceEmbedding: map['face_embedding'] as String,
-      latitude: map['latitude'] as double,
-      longitude: map['longitude'] as double,
-    )).toList();
+    return maps
+        .map(
+          (map) => AttendanceRecord(
+            id: map['id'] as int,
+            userId: map['userId'] as String,
+            timestamp: DateTime.parse(map['timestamp'] as String),
+            faceEmbedding: map['face_embedding'] as String,
+            latitude: map['latitude'] as double,
+            longitude: map['longitude'] as double,
+          ),
+        )
+        .toList();
   }
 
-Future<void> markAsSynced(int id) async {
-  final dbase = await dbHelper.database;
-  await dbase.update(
+  Future<void> markAsSynced(int id) async {
+    final dbase = await dbHelper.database;
+    await dbase.update(
       'attendance',
       {'is_synced': 1},
       where: 'id  = ? AND is_synced = 0 ',
@@ -63,25 +66,24 @@ Future<void> markAsSynced(int id) async {
     );
   }
 
-Future<void> saveFaceEmbedding(Float32List embedding) async {
-  final db = await dbHelper.database;
+  Future<void> saveFaceEmbedding(Float32List embedding) async {
+    final db = await dbHelper.database;
 
-  if (embedding.length != 128) {
-    throw Exception('Invalid embedding length before save: ${embedding.length}');
+    if (embedding.length != 128) {
+      throw Exception(
+        'Invalid embedding length before save: ${embedding.length}',
+      );
+    }
+
+    final normalized = FaceService.normalizeEmbedding(embedding);
+
+    // Convert Float32List to Uint8List safely
+    final bytes = normalized.buffer.asUint8List();
+
+    // Encode as Base64 string
+    final base64Str = base64Encode(bytes);
+    await db.insert('attendance', {'face_embeddings': base64Str});
   }
-
-  final normalized = FaceService.normalizeEmbedding(embedding);
-
-  // Convert Float32List to Uint8List safely
-  final bytes = normalized.buffer.asUint8List();
-
-  // Encode as Base64 string
-  final base64Str = base64Encode(bytes);
-    await db.insert('attendance', {
-    'face_embeddings': base64Str,
-  });
-}
-
 
   // Add these methods to Sitedetaildatabase class
   Future<bool> checkUserExists(String username) async {
@@ -117,6 +119,16 @@ Future<void> saveFaceEmbedding(Float32List embedding) async {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  Future<int> updatePassword(String userId, String newPassword) async {
+    final db = await dbHelper.database;
+    return db.update(
+      'users',
+      {'password': newPassword},
+      where: 'userId = ?',
+      whereArgs: [userId],
+    );
+  }
+
   Future<Map<String, dynamic>?> getUser(String username) async {
     final db = await dbHelper.database;
     final results = await db.query(
@@ -131,5 +143,16 @@ Future<void> saveFaceEmbedding(Float32List embedding) async {
   Future<List<Map<String, dynamic>>> getAllLocaion() async {
     final db = await dbHelper.database;
     return await db.query('attendance');
+  }
+
+  Future<String?> getUserPassword(String username) async {
+    final db = await dbHelper.database;
+    final result = await db.query(
+      'users',
+      where: 'username = ?',
+      whereArgs: [username],
+      limit: 1,
+    );
+    return result.isNotEmpty ? result.first['password'] as String? : null;
   }
 }

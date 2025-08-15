@@ -14,9 +14,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:simple_attendance/db/dbmethods.dart';
 import 'package:simple_attendance/models/attendance.dart';
 import 'package:simple_attendance/screens/login.dart';
+
 import 'package:simple_attendance/services/api_service.dart';
-import 'package:simple_attendance/utils/face_painter.dart';
-import 'package:tflite_flutter/tflite_flutter.dart';
 
 class AttendanceScreen extends StatefulWidget {
   final String userId;
@@ -31,88 +30,28 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     with SingleTickerProviderStateMixin {
   late CameraController _cameraController;
   bool _isCameraInitialized = false;
-  bool _isFaceDetected = false;
   bool _isCapturing = false;
   bool _isSubmitting = false;
   String? _capturedImagePath;
   String _statusMessage = 'Initializing camera...';
   int _retryCount = 0;
-  final int _maxRetries = 3;
   bool _showRetryButton = false;
   Position? _currentPosition;
   final db = AttendancedbMethods.instance;
-  int _frameCount = 0;
   bool _showPreview = false;
-  Rect? _detectedRect;
-  late Interpreter _interpreter;
-
-  // New state variables
-  Timer? _captureTimer;
-  int _captureAttempts = 0;
-  static const int maxCaptureAttempts = 3;
-  late AnimationController _animationController;
-  late Animation<double> _pulseAnimation;
-  double _faceDetectionProgress = 0.0;
-  final bool _showSuccess = false;
-  bool _showError = false;
-  bool isDetecting = false;
-  // BlazeFace model parameters
-  static const int INPUT_SIZE = 128; // Model input size
-  static const double THRESHOLD = 0.7; // Confidence threshold
-  static const String modelPath = 'assets/face_detection_front.tflite';
-  late Float32List _inputBuffer;
-  late List<List<List<double>>> _outputLocations;
-  late final List<List<double>> _blazeFaceAnchors;
   StreamSubscription? _connectivitySubscription;
   final ApiService apiService = ApiService();
-  // Max number of faces to detect
 
   @override
   void initState() {
     super.initState();
     _setupConnectivityListener();
-    _blazeFaceAnchors = generateBlazeFaceAnchors();
-    _loadModel().then((_) {
-      // Pre-allocate based on model shape
-      final inputShape = _interpreter.getInputTensor(0).shape;
-      _inputBuffer = Float32List(inputShape[1] * inputShape[2] * inputShape[3]);
-
-      final outputShape = _interpreter.getOutputTensor(0).shape;
-      _outputLocations =
-          (List.filled(
-                outputShape[0] * outputShape[1] * outputShape[2],
-                0.0,
-              ).reshape(outputShape))
-              .map<List<List<double>>>(
-                (e) =>
-                    (e as List<dynamic>)
-                        .map<List<double>>(
-                          (f) => (f as List<dynamic>).cast<double>(),
-                        )
-                        .toList(),
-              )
-              .toList();
-
-      // Similarly for other outputs
-    });
     _initializeDesktopCamera();
-    // Setup animations
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    )..repeat(reverse: true);
-
-    _pulseAnimation = Tween<double>(begin: 0.95, end: 1.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
-    );
   }
 
   @override
   void dispose() {
-    _captureTimer?.cancel();
     _cameraController.dispose();
-    _interpreter.close();
-    _animationController.dispose();
     _connectivitySubscription?.cancel();
     // Clean up temporary files
     if (_capturedImagePath != null) {
@@ -170,40 +109,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
   }
 
-  void _startCaptureTimer() {
-    _captureTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
-      if (!_isFaceDetected && _captureAttempts < maxCaptureAttempts) {
-        _captureAttempts++;
-        setState(
-          () =>
-              _statusMessage =
-                  'Looking for face... Attempt $_captureAttempts/$maxCaptureAttempts',
-        );
-      } else if (_captureAttempts >= maxCaptureAttempts) {
-        timer.cancel();
-        _handleCaptureFailure();
-      }
-    });
-  }
-
-  void _handleCaptureFailure() {
-    setState(() {
-      _showError = true;
-      _statusMessage = 'Face detection failed. Please try again.';
-    });
-
-    Future.delayed(const Duration(seconds: 3), () {
-      setState(() => _showError = false);
-      _resetCaptureProcess();
-    });
-  }
-
   void _resetCaptureProcess() {
-    // Clear previous attempts
-    _captureAttempts = 0;
-    _faceDetectionProgress = 0.0;
-    _isFaceDetected = false;
-
     // Clean up any existing files
     if (_capturedImagePath != null) {
       try {
@@ -214,217 +120,62 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       }
     }
 
-    // Restart the process
-    _startCaptureTimer();
-    setState(() => _statusMessage = 'Align your face within the screen');
-  }
-
- Future<void> _initializeDesktopCamera() async {
-  try {
-    // Desktop cameras might need different handling
-    final cameras = await availableCameras();
-    if (cameras.isEmpty) {
-      throw Exception('No camera detected');
-    }
-
-    _cameraController = CameraController(
-      cameras.first,
-      ResolutionPreset.high,
-      enableAudio: false,
-    );
-
-    await _cameraController.initialize();
-    _cameraController.startImageStream(_processCameraImage);
+    // Reset status message for Windows
     setState(() {
-      _isCameraInitialized = true;
-      _statusMessage = 'Camera initialized successfully';
+      _statusMessage = 'Camera ready - Click the camera button to take a photo';
     });
-  } catch (e) {
-    setState(() => _statusMessage = 'Failed to initialize Desktop camera: $e');
-    throw Exception('Camera initialization failed: $e');
   }
-}
 
-  // 1. First, update your model loading with proper verification
-  Future<void> _loadModel() async {
+  Future<void> _initializeDesktopCamera() async {
     try {
-      final options = InterpreterOptions();
-      _interpreter = await Interpreter.fromAsset(modelPath, options: options);
-      _interpreter.allocateTensors();
-      // Verify input/output tensors
-      final inputTensor = _interpreter.getInputTensor(0);
-      // Pre-allocate buffers based on model shape
-      final inputShape = inputTensor.shape;
-      _inputBuffer = Float32List(inputShape[1] * inputShape[2] * inputShape[3]);
+      // Desktop cameras might need different handling
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        throw Exception('No camera detected');
+      }
+
+      _cameraController = CameraController(
+        cameras.first,
+        ResolutionPreset.medium,
+        enableAudio: false,
+      );
+
+      await _cameraController.initialize();
+
+      // For Windows, we'll use manual capture only (no automatic face detection)
+      setState(() {
+        _isCameraInitialized = true;
+        _statusMessage =
+            'Camera ready - Click the camera button to take a photo';
+      });
+
+      // Start Windows capture mode
+      _startWindowsCaptureMode();
     } catch (e) {
-      setState(() => _statusMessage = 'Failed to load model: $e');
-      throw Exception('Model loading failed: $e');
+      debugPrint('Camera initialization failed: $e');
+      setState(() => _statusMessage = 'Failed to initialize camera: $e');
+      throw Exception('Camera initialization failed: $e');
     }
   }
 
-  // 2. Optimized tensor conversion
-  Float32List _convertImageToTensor(CameraImage image) {
-    // BlazeFace typically expects [1, 128, 128, 3] normalized to [-1,1]
-    final inputSize = INPUT_SIZE;
-    final input = Float32List(1 * inputSize * inputSize * 3);
-
-    // Convert YUV to RGB and resize in one pass
-    final yBuffer = image.planes[0].bytes;
-    final uBuffer = image.planes[1].bytes;
-    final vBuffer = image.planes[2].bytes;
-    final yRowStride = image.planes[0].bytesPerRow;
-    final uvRowStride = image.planes[1].bytesPerRow;
-    final uvPixelStride = image.planes[1].bytesPerPixel ?? 1;
-
-    final scaleX = image.width / inputSize;
-    final scaleY = image.height / inputSize;
-
-    for (int y = 0; y < inputSize; y++) {
-      for (int x = 0; x < inputSize; x++) {
-        // Map input coordinates to original image
-        final srcX = (x * scaleX).toInt().clamp(0, image.width - 1);
-        final srcY = (y * scaleY).toInt().clamp(0, image.height - 1);
-
-        // Get YUV values
-        final yValue = yBuffer[srcY * yRowStride + srcX];
-        final uvIndex = (srcY ~/ 2) * uvRowStride + (srcX ~/ 2) * uvPixelStride;
-        final uValue = uBuffer[uvIndex];
-        final vValue = vBuffer[uvIndex];
-
-        // Convert to RGB and normalize to [-1,1]
-        final r = (yValue + 1.402 * (vValue - 128)) / 128.0 - 1.0;
-        final g =
-            (yValue - 0.344136 * (uValue - 128) - 0.714136 * (vValue - 128)) /
-                128.0 -
-            1.0;
-        final b = (yValue + 1.772 * (uValue - 128)) / 128.0 - 1.0;
-
-        // Fill tensor (NHWC format)
-        final index = (y * inputSize + x) * 3;
-        input[index] = r;
-        input[index + 1] = g;
-        input[index + 2] = b;
-      }
-    }
-
-    return input;
+  // Windows-specific capture mode without image streaming
+  void _startWindowsCaptureMode() {
+    setState(() {
+      _statusMessage = 'Camera ready - Click the camera button to take a photo';
+    });
   }
 
-  List<List<double>> generateBlazeFaceAnchors() {
-    const List<int> strides = [8, 16];
-    const List<int> anchorsPerStride = [2, 6];
-    const double minScale = 0.1484375;
-    const double maxScale = 0.75;
-    const int inputSize = 128;
+  // Manual capture method for Windows (when image streaming is not supported)
+  Future<void> _manualCaptureForWindows() async {
+    if (_isCapturing) return;
 
-    List<List<double>> anchors = [];
-
-    int layerId = 0;
-    for (var stride in strides) {
-      int featureMapSize = (inputSize / stride).floor();
-      int numAnchors = anchorsPerStride[layerId];
-
-      for (int y = 0; y < featureMapSize; y++) {
-        for (int x = 0; x < featureMapSize; x++) {
-          for (int a = 0; a < numAnchors; a++) {
-            double xCenter = (x + 0.5) * stride / inputSize;
-            double yCenter = (y + 0.5) * stride / inputSize;
-            double scale =
-                minScale + (maxScale - minScale) * a / (numAnchors - 1);
-            anchors.add([xCenter, yCenter, scale, scale]);
-          }
-        }
-      }
-
-      layerId++;
-    }
-
-    return anchors;
-  }
-
-  Future<void> _processCameraImage(CameraImage image) async {
-    if (!_isCameraInitialized || _isCapturing) return;
-
-    _frameCount++;
-    if (_frameCount % 3 != 0) return;
+    setState(() {
+      _isCapturing = true;
+      _statusMessage = 'Capturing photo...';
+    });
 
     try {
-      final input = _convertImageToTensor(image);
-      final reshapedInput = input.reshape([1, INPUT_SIZE, INPUT_SIZE, 3]);
-
-      var outputBoxes = List.generate(
-        1,
-        (_) => List.generate(896, (_) => List.filled(16, 0.0)),
-      );
-      var outputScores = List.generate(
-        1,
-        (_) => List.generate(896, (_) => List.filled(1, 0.0)),
-      );
-      final outputs = <int, Object>{0: outputBoxes, 1: outputScores};
-      _interpreter.runForMultipleInputs([reshapedInput], outputs);
-
-      List<List<double>> regressors = outputBoxes[0]; // [896][16]
-      List<List<double>> scores = outputScores[0]; // [896][1]
-
-      // Find best score above threshold
-      int bestIndex = -1;
-      double bestScore = 0.0;
-
-      for (int i = 0; i < 896; i++) {
-        final double confidence = 1 / (1 + exp(-scores[i][0]));
-        if (confidence > bestScore && confidence > THRESHOLD) {
-          bestScore = confidence;
-          bestIndex = i;
-        }
-      }
-      if (bestIndex == -1) {
-        return;
-      }
-
-      // Decode bounding box
-      final List<double> anchor = _blazeFaceAnchors[bestIndex];
-      final List<double> reg = regressors[bestIndex];
-
-      final double dx = reg[0];
-      final double dy = reg[1];
-      final double dw = reg[2];
-      final double dh = reg[3];
-
-      final double xCenter = anchor[0] + dx * anchor[2];
-      final double yCenter = anchor[1] + dy * anchor[3];
-      final double w = anchor[2] * exp(dw);
-      final double h = anchor[3] * exp(dh);
-
-      final double xMin = (xCenter - w / 2).clamp(0.0, 1.0);
-      final double yMin = (yCenter - h / 2).clamp(0.0, 1.0);
-      final double xMax = (xCenter + w / 2).clamp(0.0, 1.0);
-      final double yMax = (yCenter + h / 2).clamp(0.0, 1.0);
-
-      final faceRect = Rect.fromLTRB(xMin, yMin, xMax, yMax);
-      _captureFace(faceRect);
-
-      setState(() {
-        _isFaceDetected = true;
-        _detectedRect = faceRect;
-      });
-    } catch (e, stack) {
-      setState(() {
-        _statusMessage = 'Error processing image. Try again.$stack';
-        _isFaceDetected = false;
-      });
-    }
-  }
-
-  Future<void> _captureFace(Rect faceBox) async {
-    try {
-      setState(() {
-        _isCapturing = true;
-        _statusMessage = 'Capturing face...';
-      });
-
-      await _cameraController.stopImageStream();
-      await Future.delayed(const Duration(milliseconds: 300));
-
+      // Take the picture
       final XFile picture = await _cameraController.takePicture();
       final bytes = await picture.readAsBytes();
       img.Image originalImage = img.decodeImage(bytes)!;
@@ -434,45 +185,17 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         originalImage = img.flipHorizontal(originalImage);
       }
 
-      final int imageWidth = originalImage.width;
-      final int imageHeight = originalImage.height;
-
-      // Convert normalized rect to absolute pixels with padding
-      const double paddingFactor = 0.1;
-      final double normLeft = (faceBox.left - paddingFactor).clamp(0.0, 1.0);
-      final double normTop = (faceBox.top - paddingFactor).clamp(0.0, 1.0);
-      final double normRight = (faceBox.right + paddingFactor).clamp(0.0, 1.0);
-      final double normBottom = (faceBox.bottom + paddingFactor).clamp(
-        0.0,
-        1.0,
-      );
-
-      final int cropX = (normLeft * imageWidth).round();
-      final int cropY = (normTop * imageHeight).round();
-      final int cropWidth = ((normRight - normLeft) * imageWidth).round();
-      final int cropHeight = ((normBottom - normTop) * imageHeight).round();
-
-      final int clampedX = cropX.clamp(0, imageWidth - 1);
-      final int clampedY = cropY.clamp(0, imageHeight - 1);
-      final int clampedWidth = cropWidth.clamp(1, imageWidth - clampedX);
-      final int clampedHeight = cropHeight.clamp(1, imageHeight - clampedY);
-      final img.Image croppedFace = img.copyCrop(
-        originalImage,
-        x: clampedX,
-        y: clampedY,
-        width: clampedWidth,
-        height: clampedHeight,
-      );
+      // Save the captured image
       final Directory tempDir = await getTemporaryDirectory();
       final String filePath =
-          '${tempDir.path}/face_${DateTime.now().millisecondsSinceEpoch}.jpg';
+          '${tempDir.path}/attendance_${DateTime.now().millisecondsSinceEpoch}.jpg';
       final File faceFile = File(filePath)
-        ..writeAsBytesSync(img.encodeJpg(croppedFace, quality: 90));
+        ..writeAsBytesSync(img.encodeJpg(originalImage, quality: 90));
 
       setState(() {
         _capturedImagePath = faceFile.path;
         _showPreview = true;
-        _statusMessage = 'Face captured successfully';
+        _statusMessage = 'Photo captured! Review and confirm to continue';
       });
     } catch (e, stack) {
       setState(() => _statusMessage = 'Capture failed. Try again.$stack');
@@ -485,17 +208,15 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   void _handlePreviewAccept() {
     setState(() {
       _showPreview = false;
-      _statusMessage = 'Photo Accepted!...Finding location...';
+      _statusMessage = 'Photo accepted! Now acquiring location...';
     });
     _getCurrentLocation();
-    _submitAttendance();
   }
 
   void _handlePreviewReject() {
     setState(() {
       _showPreview = false;
-      _statusMessage = 'Face capture rejected. Trying again...';
-      _resetCaptureProcess();
+      _statusMessage = 'Photo rejected. Click the camera button to try again.';
     });
 
     // Delete the rejected image
@@ -503,9 +224,13 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       File(_capturedImagePath!).delete();
       _capturedImagePath = null;
     }
-    // Restart the camera stream
-    if (_isCameraInitialized && !_cameraController.value.isStreamingImages) {
-      _cameraController.startImageStream(_processCameraImage);
+
+    // For Windows, no need to restart image stream
+    // For mobile platforms, restart the camera stream if needed
+    if (_isCameraInitialized &&
+        _cameraController.supportsImageStreaming() &&
+        !_cameraController.value.isStreamingImages) {
+      _cameraController.startImageStream((image) {});
     }
   }
 
@@ -515,66 +240,77 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         _statusMessage = 'Checking location service...';
         _showRetryButton = false;
       });
+
       // Check if location service is enabled
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        // Show message to user and wait for them to enable
         setState(
-          () => _statusMessage = 'Please enable Location Services in Settings',
+          () =>
+              _statusMessage =
+                  'Please enable Location Services in Windows Settings',
         );
-        // Wait and check again in a loop
-        for (int i = 0; i < 15; i++) {
-          // Check for up to 15 seconds
-          await Future.delayed(const Duration(seconds: 1));
-          serviceEnabled = await Geolocator.isLocationServiceEnabled();
-          if (serviceEnabled) {
-        
-            setState(() => _statusMessage = 'Location Enabled! Continuing...');
-            await Future.delayed(const Duration(seconds: 1));
-            break;
-          } else {
-            setState(
-              () =>
-                  _statusMessage = 'Enable location... (${15 - i}s remaining)',
-            );
-          }
-        }
+        // For Windows, show a more helpful message
+        await Future.delayed(const Duration(seconds: 3));
+        setState(
+          () =>
+              _statusMessage =
+                  'You can enable location in Windows Settings > Privacy > Location',
+        );
+        await Future.delayed(const Duration(seconds: 3));
+        throw Exception(
+          'Location services are disabled. Please enable them in Windows Settings.',
+        );
       }
+
       // Check and request permission
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
+        setState(() => _statusMessage = 'Requesting location permission...');
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
-          throw Exception('Location permissions are denied');
+          throw Exception(
+            'Location permission denied. Please allow location access.',
+          );
         }
       }
 
       if (permission == LocationPermission.deniedForever) {
-        // Guide user to app settings
         setState(
           () =>
               _statusMessage =
-                  'Please enable location permissions in App Settings',
+                  'Location permission permanently denied. Please enable in Windows Settings.',
         );
-        throw Exception('Location permissions permanently denied');
+        await Future.delayed(const Duration(seconds: 3));
+        throw Exception(
+          'Location permissions permanently denied. Please enable in Windows Settings > Privacy > Location.',
+        );
       }
-      // Get current position
+
+      // Get current position with timeout
+      setState(() => _statusMessage = 'Acquiring location...');
       final position = await Geolocator.getCurrentPosition(
-        // ignore: deprecated_member_use
-        desiredAccuracy: LocationAccuracy.best,
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 30),
       );
 
       setState(() {
         _currentPosition = position;
-        _statusMessage = 'Location acquired! Submitting...';
+        _statusMessage = 'Location acquired! Submitting attendance...';
       });
 
       await _submitAttendance();
     } catch (e) {
-      setState(() => _statusMessage = 'Location error: ${e.toString()}');
+      String errorMsg = 'Location error: ${e.toString()}';
+      if (e.toString().contains('denied')) {
+        errorMsg =
+            'Location permission denied. Please enable location access in Windows Settings > Privacy > Location';
+      } else if (e.toString().contains('timeout')) {
+        errorMsg = 'Location acquisition timed out. Please try again.';
+      }
+
+      setState(() => _statusMessage = errorMsg);
       _showRetryButton = true;
     }
-    ;
   }
 
   Future<void> _submitAttendance() async {
@@ -684,7 +420,6 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     );
   }
 
-
   Widget _buildBackButton() {
     return Positioned(
       top: 40,
@@ -706,31 +441,105 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     );
   }
 
+  Widget _buildManualCaptureButton() {
+    return Positioned(
+      bottom: 80,
+      right: 20,
+      child: FloatingActionButton(
+        onPressed: _manualCaptureForWindows,
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+        elevation: 8,
+        child: const Icon(Icons.camera, size: 28),
+        tooltip: 'Take Photo',
+      ),
+    );
+  }
+
+  Widget _buildCaptureInstructions() {
+    return Positioned(
+      bottom: 160,
+      right: 20,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Text(
+          'Click to take photo',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Helper method to open Windows location settings
+  Future<void> _openWindowsLocationSettings() async {
+    try {
+      // Try to open Windows location settings
+      final result = await Process.run('cmd', [
+        '/c',
+        'start',
+        'ms-settings:privacy-location',
+      ]);
+      if (result.exitCode != 0) {
+        throw Exception('Failed to open settings');
+      }
+    } catch (e) {
+      // Fallback: show detailed instructions
+      setState(() {
+        _statusMessage =
+            'Please manually go to: Windows Settings > Privacy & Security > Location > Location Services (ON)';
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    // Check orientation for potential layout adjustments (e.g., in a complex layout)
-    final isPortrait =
-        MediaQuery.of(context).orientation == Orientation.portrait;
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+    final screenSize = MediaQuery.of(context).size;
+    final isDesktop = screenSize.width > 800;
+    final isTablet = screenSize.width > 600 && !isDesktop;
+
+    if (!_isCameraInitialized || !_cameraController.value.isInitialized) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(color: Colors.white),
+              const SizedBox(height: 20),
+              Text(
+                'Initializing camera...',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(color: Colors.white),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
+          // Camera Preview
           if (_isCameraInitialized)
-            CameraPreview(_cameraController, key: ValueKey<bool>(_showPreview)),
-
-          if (_isFaceDetected && _detectedRect != null)
             Positioned.fill(
-              child: CustomPaint(
-                painter: FacePainter(
-                  rect: _detectedRect!,
-                  imageSize: _cameraController.value.previewSize!,
-                ),
+              child: CameraPreview(
+                _cameraController,
+                key: ValueKey<bool>(_showPreview),
               ),
             ),
-          // Semi-transparent overlay
+
+          // Gradient Overlay
           Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -747,196 +556,241 @@ class _AttendanceScreenState extends State<AttendanceScreen>
             ),
           ),
 
-          // Preview overlay (on top of everything else when active)
+          // Preview Overlay
           if (_showPreview && _capturedImagePath != null)
-            _buildPreviewOverlay(isSmallScreen),
+            _buildPreviewOverlay(isDesktop, isTablet),
 
-          // Success overlay
-          if (_showSuccess)
-            Container(
-              color: Colors.green.withOpacity(0.85),
-              child: const Center(
-                child: Icon(Icons.check_circle, size: 120, color: Colors.white),
-              ),
-            ),
-
-          // Error overlay
-          if (_showError)
-            Container(
-              color: Colors.red.withOpacity(0.85),
-              child: const Center(
-                child: Icon(
-                  Icons.error_outline,
-                  size: 120,
-                  color: Colors.white,
+          // Main Content
+          Column(
+            children: [
+              // Header
+              Padding(
+                padding: EdgeInsets.only(
+                  top: isDesktop ? 40 : 20,
+                  left: isDesktop ? 40 : 20,
+                  right: isDesktop ? 40 : 20,
                 ),
-              ),
-            ),
-
-          // Status message (always visible unless preview is showing)
-          if (!_showPreview)
-            Positioned(
-              bottom: isPortrait ? 100 : 50, // Adjust based on orientation
-              left: 20,
-              right: 20,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                child: Text(
-                  _statusMessage,
-                  key: ValueKey<String>(_statusMessage),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: isPortrait ? 18 : 16, // Responsive font size
-                    fontWeight: FontWeight.w500,
-                    shadows: [
-                      Shadow(
-                        blurRadius: 10.0,
-                        color: Colors.black,
-                        offset: Offset(2.0, 2.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      onPressed:
+                          () => Navigator.pushAndRemoveUntil(
+                            context,
+                            MaterialPageRoute(
+                              builder:
+                                  (context) =>
+                                      LoginScreen(apiService: apiService),
+                            ),
+                            (Route<dynamic> route) => false,
+                          ),
+                      tooltip: 'Back',
+                    ),
+                    if (isDesktop)
+                      Text(
+                        'Attendance Capture',
+                        style: Theme.of(
+                          context,
+                        ).textTheme.headlineSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-          // Attempt counter (only when not showing preview)
-          if (!_showPreview)
-            if (_captureAttempts >= maxCaptureAttempts &&
-                !_isFaceDetected &&
-                !_showPreview)
-              Positioned(
-                bottom: isPortrait ? 160 : 100, // Adjust based on orientation
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: Text(
-                    'We couldn\'t detect your face. Try better lighting.',
-                    style: TextStyle(color: Colors.redAccent, fontSize: 16),
-                  ),
+                    const SizedBox(width: 48), // Balance the header
+                  ],
                 ),
               ),
 
-          // Manual retry button (only when error and not preview)
-          if (_showError && !_showPreview)
-            Positioned(
-              bottom: isPortrait ? 40 : 20, // Adjust based on orientation
-              left: 0,
-              right: 0,
-              child: Center(
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('TRY AGAIN'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueAccent,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 16,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
+              // Status Message
+              if (!_showPreview)
+                Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isDesktop ? 100 : 20,
+                    vertical: 20,
+                  ),
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    child: Text(
+                      _statusMessage,
+                      key: ValueKey<String>(_statusMessage),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Colors.white,
+                        shadows: [
+                          const Shadow(
+                            blurRadius: 10.0,
+                            color: Colors.black,
+                            offset: Offset(2.0, 2.0),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  onPressed: () {
-                    setState(() => _showError = false);
-                    _captureAttempts = 0;
-                    _faceDetectionProgress = 0.0;
-                    _isFaceDetected = false;
-                    _detectedRect = null;
-                    _statusMessage = 'Align your face within the screen';
-                    _resetCaptureProcess();
-                    _startCaptureTimer();
-                  },
+                ),
+
+              // Spacer to push controls to bottom
+              const Spacer(),
+
+              // Controls Section
+              Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: isDesktop ? 100 : 20,
+                  vertical: 20,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!_showPreview && _showRetryButton)
+                      Column(
+                        children: [
+                          ElevatedButton(
+                            onPressed: () {
+                              _retryCount = 0;
+                              _getCurrentLocation();
+                            },
+                            child: const Text('Retry Location'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue[700],
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isDesktop ? 32 : 24,
+                                vertical: 16,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextButton(
+                            onPressed: _openWindowsLocationSettings,
+                            child: const Text('Open Location Settings'),
+                          ),
+                        ],
+                      ),
+
+                    // Capture Button (for Windows when needed)
+                    if (!_showPreview &&
+                        _isCameraInitialized &&
+                        _cameraController.value.isInitialized &&
+                        !_cameraController.supportsImageStreaming())
+                      Padding(
+                        padding: const EdgeInsets.only(top: 20),
+                        child: FloatingActionButton.extended(
+                          onPressed: _manualCaptureForWindows,
+                          backgroundColor: Colors.blue[700],
+                          foregroundColor: Colors.white,
+                          elevation: 8,
+                          icon: const Icon(Icons.camera),
+                          label: const Text('CAPTURE'),
+                          tooltip: 'Take Photo',
+                        ),
+                      ),
+                  ],
                 ),
               ),
-            ),
-          // Status message and retry button (always visible at the bottom, above control buttons)
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(_statusMessage, textAlign: TextAlign.center),
-                const SizedBox(height: 12),
-                if (_showRetryButton)
-                  ElevatedButton(
-                    onPressed: () {
-                      _retryCount = 0;
-                      _getCurrentLocation();
-                    },
-                    child: const Text('Try Again'),
-                  ),
-              ],
-            ),
+            ],
           ),
-          // Control buttons (always visible unless preview is showing)
-          if (!_showPreview) ...[_buildBackButton()],
         ],
       ),
     );
   }
 
-  Widget _buildPreviewOverlay(isSmallScreen) {
+  Widget _buildPreviewOverlay(bool isDesktop, bool isTablet) {
     return Container(
-      color: Colors.black.withOpacity(0.9),
-      child: Stack(
+      color: Colors.black.withOpacity(0.95),
+      child: Column(
         children: [
-          // Preview image
-          Center(
-            child: Container(
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.9,
-                maxHeight: MediaQuery.of(context).size.height * 0.7,
-              ),
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: Image.file(File(_capturedImagePath!)),
+          // Header
+          Padding(
+            padding: EdgeInsets.only(
+              top: isDesktop ? 60 : 40,
+              left: 40,
+              right: 40,
+            ),
+            child: Column(
+              children: [
+                Text(
+                  'REVIEW YOUR PHOTO',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Review your photo and click ACCEPT to continue with attendance',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyLarge?.copyWith(color: Colors.white70),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+
+          // Image Preview
+          Expanded(
+            child: Center(
+              child: Container(
+                constraints: BoxConstraints(
+                  maxWidth:
+                      isDesktop
+                          ? 800
+                          : isTablet
+                          ? 600
+                          : MediaQuery.of(context).size.width * 0.9,
+                  maxHeight: MediaQuery.of(context).size.height * 0.6,
+                ),
+                child: InteractiveViewer(
+                  panEnabled: true,
+                  minScale: 1,
+                  maxScale: 3,
+                  child: Image.file(File(_capturedImagePath!)),
+                ),
               ),
             ),
           ),
-          // Accept/Reject buttons
-          Positioned(
-            bottom: 40,
-            left: 0,
-            right: 0,
+
+          // Action Buttons
+          Padding(
+            padding: const EdgeInsets.only(bottom: 40),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Reject button
+                // Reject Button
                 ElevatedButton.icon(
                   icon: const Icon(Icons.refresh),
                   label: const Text('RETRY'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
+                    backgroundColor: Colors.red[700],
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isDesktop ? 32 : 24,
                       vertical: 16,
                     ),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                   ),
                   onPressed: _handlePreviewReject,
                 ),
 
-                // Accept button
+                const SizedBox(width: 20),
+
+                // Accept Button
                 ElevatedButton.icon(
                   icon: const Icon(Icons.check),
                   label: const Text('ACCEPT'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
+                    backgroundColor: Colors.green[700],
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isDesktop ? 32 : 24,
                       vertical: 16,
                     ),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                   ),
                   onPressed: _handlePreviewAccept,
@@ -944,61 +798,6 @@ class _AttendanceScreenState extends State<AttendanceScreen>
               ],
             ),
           ),
-
-          // Preview title
-          Positioned(
-            top: 60,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Text(
-                'REVIEW YOUR PHOTO',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize:
-                      MediaQuery.of(context).size.width > 600
-                          ? 28
-                          : 22, // Responsive font size
-                  fontWeight: FontWeight.bold,
-                  shadows: [
-                    Shadow(
-                      blurRadius: 10.0,
-                      color: Colors.black,
-                      offset: const Offset(2.0, 2.0),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // Preview instructions
-          Positioned(
-            top: 80,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Text(
-                'Make sure your face is clear and centered',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize:
-                      MediaQuery.of(context).size.width > 600
-                          ? 18
-                          : 16, // Responsive font size
-                  fontWeight: FontWeight.w500,
-                  shadows: [
-                    Shadow(
-                      blurRadius: 10.0,
-                      color: Colors.black,
-                      offset: const Offset(2.0, 2.0),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          // Add this to your build method
         ],
       ),
     );
