@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart' as LocationService;
+import 'package:simple_attendance/services/notification_service.dart';
 
 import '/services/face_service.dart';
 
@@ -27,6 +28,8 @@ void main() async {
   ]);
   await FaceService.init();
    await apiService.processPendingSyncs();
+   final notificationService = NotificationService();
+  await notificationService.initialize();
   // After successful login
   // In your main.dart or wherever you initialize your database
 
