@@ -132,4 +132,24 @@ Future<void> saveFaceEmbedding(Float32List embedding) async {
     final db = await dbHelper.database;
     return await db.query('attendance');
   }
+   Future<String?> getUserPassword(String username) async {
+    final db = await dbHelper.database;
+    final result = await db.query(
+      'users',
+      where: 'username = ?',
+      whereArgs: [username],
+      limit: 1,
+    );
+    return result.isNotEmpty ? result.first['password'] as String? : null;
+  }
+  
+  Future<int> updatePassword(String userId, String newPassword) async {
+    final db = await dbHelper.database;
+    return db.update(
+      'users',
+      {'password': newPassword},
+      where: 'userId = ?',
+      whereArgs: [userId],
+    );
+  }
 }

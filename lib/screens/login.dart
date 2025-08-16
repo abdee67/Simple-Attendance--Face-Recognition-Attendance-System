@@ -56,65 +56,124 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     super.dispose();
   }
 
+
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
-    
+
     setState(() => _isLoading = true);
-    final connectivityResult = await Connectivity().checkConnectivity();
-    final isOnline = connectivityResult != ConnectivityResult.none;
-    final username = _usernameController.text;
-    final password = _passwordController.text;
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text.trim();
 
     try {
-      // Check if user exists in local DB
+      // 1. Check connectivity with timeout
+      bool isOnline;
+      try {
+        final connectivityResult = await Connectivity()
+            .checkConnectivity()
+            .timeout(const Duration(seconds: 3));
+        isOnline = connectivityResult != ConnectivityResult.none;
+      } catch (e) {
+        isOnline = false;
+        debugPrint('Connectivity check failed, assuming offline: $e');
+      }
+
+      // 2. Check if user exists in local DB
       final userExists = await dbmethods.checkUserExists(username);
 
-      if (isOnline) {
-        if (userExists) {
-          // Online + existing user: validate locally
-          final isValid = await dbmethods.validateUser(username, password);
-          if (isValid) {
-            _navigateToHome();
-          } else {
-            _showError('Invalid username or password!');
-          }
+      if (!isOnline) {
+        // OFFLINE FLOW
+        if (!userExists) {
+          _showError('First login requires internet connection');
+          return;
+        }
+
+        // Validate against local database
+        final isValid = await dbmethods.validateUser(username, password);
+        if (isValid) {
+          _navigateToHome();
         } else {
-          // Online + new user: authenticate via API
-          final result = await widget.apiService.authenticateUser(username, password);
-          if (result['success'] == true) {
-            // Save to local DB
-            final userId = result['userId'] as String?;
+          _showError(
+            'Invalid credentials - please connect to internet to verify',
+          );
+        }
+        return;
+      }
+
+      // ONLINE FLOW
+      try {
+        final apiResult = await widget.apiService
+            .authenticateUser(username, password)
+            .timeout(const Duration(seconds: 10));
+
+        if (apiResult['success'] == true) {
+          // Handle successful API authentication
+          final userId = apiResult['userId']?.toString() ?? username;
+
+          if (userExists) {
+            // Check if password needs updating
+            final localPassword = await dbmethods.getUserPassword(username);
+            if (localPassword != password) {
+              await dbmethods.updatePassword(userId, password);
+              _showSuccess('Credentials updated');
+            }
+          } else {
+            // New user - save to local DB
             await dbmethods.insertUser(username, password, userId: userId);
-            // RESET ADDRESS TABLE ONLY FOR FIRST-TIME LOGIN
-            if (result['latitude'] != null && result['longitude'] != null) {
-    await _resetAndSyncAddresses(result); // Pass the entire result
-  }
-            _navigateToHome();
-          } else {
-            _showError(result['error']);
+            _showSuccess('Welcome! Account created');
           }
+
+          // Sync location data if available
+          if (apiResult['latitude'] != null && apiResult['longitude'] != null) {
+            await _resetAndSyncAddresses(apiResult);
+          }
+
+          _navigateToHome();
+        } else {
+          // API authentication failed - try local fallback
+          if (userExists) {
+            final isValid = await dbmethods.validateUser(username, password);
+            if (isValid) {
+              _navigateToHome();
+              return;
+            }
+          }
+          _showError(apiResult['error']?.toString() ?? 'Authentication failed');
         }
-      } else {
+      } catch (apiError) {
+        // API call failed - try local fallback
+        debugPrint('API error: $apiError');
         if (userExists) {
-          // Offline + existing user: validate locally
           final isValid = await dbmethods.validateUser(username, password);
           if (isValid) {
             _navigateToHome();
-          } else {
-            _showError('Invalid username or password!');
+            return;
           }
-        } else {
-          // Offline + new user: not possible
-          _showError('No internet connection. First login requires internet');
         }
+        _showError('Connection unstable - try again or use offline mode');
       }
     } catch (e) {
-      _showError('Error: ${e.toString()}');
+      _showError(_getErrorMessage(e));
+      debugPrint('Login error: $e');
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  String _getErrorMessage(dynamic error) {
+    return error.toString().replaceFirst(
+      'Null check operator used on a null value',
+      'System error',
+    );
+  }
+
+  void _showSuccess(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _resetAndSyncAddresses(dynamic locationData) async {
