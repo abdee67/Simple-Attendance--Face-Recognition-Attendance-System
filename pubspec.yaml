@@ -52,6 +52,7 @@ dependencies:
   tflite_flutter: ^0.11.0
   flutter_native_splash: ^2.4.6
   camera_windows: ^0.2.6+2
+  universal_platform: ^1.1.0
 
   
 dev_dependencies:

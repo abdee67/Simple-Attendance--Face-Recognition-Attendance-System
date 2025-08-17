@@ -2,7 +2,6 @@
 
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -14,8 +13,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:simple_attendance/db/dbmethods.dart';
 import 'package:simple_attendance/models/attendance.dart';
 import 'package:simple_attendance/screens/login.dart';
-
 import 'package:simple_attendance/services/api_service.dart';
+import 'package:universal_platform/universal_platform.dart';
 
 class AttendanceScreen extends StatefulWidget {
   final String userId;
@@ -41,6 +40,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   bool _showPreview = false;
   StreamSubscription? _connectivitySubscription;
   final ApiService apiService = ApiService();
+  bool _showNoCameraUI = false;
 
   @override
   void initState() {
@@ -128,23 +128,35 @@ class _AttendanceScreenState extends State<AttendanceScreen>
 
   Future<void> _initializeDesktopCamera() async {
     try {
+         setState(() {
+      _statusMessage = 'Looking for available cameras...';
+      _isCameraInitialized = false;
+    });
       // Desktop cameras might need different handling
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
-        throw Exception('No camera detected');
+        setState(() {
+          _isCameraInitialized = false;
+          _showNoCameraUI = true;
+        });
+        return;
       }
+      final camera = cameras.firstWhere(
+        (cam) => cam.lensDirection == CameraLensDirection.front,
+        orElse: () =>cameras.first,
+      );
 
       _cameraController = CameraController(
-        cameras.first,
+        camera,
         ResolutionPreset.medium,
         enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.bgra8888,
       );
 
       await _cameraController.initialize();
-
-      // For Windows, we'll use manual capture only (no automatic face detection)
       setState(() {
         _isCameraInitialized = true;
+        _showNoCameraUI = false;
         _statusMessage =
             'Camera ready - Click the camera button to take a photo';
       });
@@ -153,7 +165,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       _startWindowsCaptureMode();
     } catch (e) {
       debugPrint('Camera initialization failed: $e');
-      setState(() => _statusMessage = 'Failed to initialize camera: $e');
+      setState(() { _statusMessage = 'Failed to initialize camera: $e';
+      _showNoCameraUI = true;
+    });
       throw Exception('Camera initialization failed: $e');
     }
   }
@@ -420,64 +434,6 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     );
   }
 
-  Widget _buildBackButton() {
-    return Positioned(
-      top: 40,
-      left: 20,
-      child: CircleAvatar(
-        backgroundColor: Colors.black54,
-        child: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed:
-              () => Navigator.pushAndRemoveUntil(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => LoginScreen(apiService: apiService),
-                ),
-                (Route<dynamic> route) => false,
-              ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildManualCaptureButton() {
-    return Positioned(
-      bottom: 80,
-      right: 20,
-      child: FloatingActionButton(
-        onPressed: _manualCaptureForWindows,
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
-        elevation: 8,
-        child: const Icon(Icons.camera, size: 28),
-        tooltip: 'Take Photo',
-      ),
-    );
-  }
-
-  Widget _buildCaptureInstructions() {
-    return Positioned(
-      bottom: 160,
-      right: 20,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.black54,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: const Text(
-          'Click to take photo',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ),
-    );
-  }
-
   // Helper method to open Windows location settings
   Future<void> _openWindowsLocationSettings() async {
     try {
@@ -502,28 +458,13 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
-    final isDesktop = screenSize.width > 800;
+    final isDesktop = UniversalPlatform.isDesktop;
     final isTablet = screenSize.width > 600 && !isDesktop;
-
+ if (_showNoCameraUI) {
+    return _buildNoCameraScreen();
+  }
     if (!_isCameraInitialized || !_cameraController.value.isInitialized) {
-      return Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const CircularProgressIndicator(color: Colors.white),
-              const SizedBox(height: 20),
-              Text(
-                'Initializing camera...',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(color: Colors.white),
-              ),
-            ],
-          ),
-        ),
-      );
+     return _buildLoadingScreen();
     }
 
     return Scaffold(
@@ -802,4 +743,182 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       ),
     );
   }
+  Widget _buildNoCameraScreen() {
+  return Scaffold(
+    backgroundColor: Colors.black,
+    body: Center(
+      child: Container(
+        padding: const EdgeInsets.all(32),
+        constraints: const BoxConstraints(maxWidth: 600),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.videocam_off_rounded,
+              size: 80,
+              color: Colors.white54,
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'No Camera Detected',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _statusMessage,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 32),
+            if (UniversalPlatform.isWindows)
+              Column(
+                children: [
+                  ElevatedButton(
+                    onPressed: _checkForCamerasAgain,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 32,
+                        vertical: 16,
+                      ),
+                    ),
+                    child: const Text('Check Again'),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'If you just connected a camera, try checking again',
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            if (!UniversalPlatform.isWindows)
+              ElevatedButton(
+                onPressed: () => Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => LoginScreen(apiService: apiService),
+                  ),
+                  (Route<dynamic> route) => false,
+                ),
+                child: const Text('Return to Login'),
+              ),
+            const SizedBox(height: 24),
+            const Divider(color: Colors.white24),
+            const SizedBox(height: 16),
+            Text(
+              'Troubleshooting Tips:',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildTroubleshootItem('1. Ensure camera is properly connected'),
+                  _buildTroubleshootItem('2. Check system permissions'),
+                  _buildTroubleshootItem('3. Try restarting the application'),
+                  if (UniversalPlatform.isWindows)
+                    _buildTroubleshootItem('4. Verify camera works in other apps'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _buildTroubleshootItem(String text) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(top: 4, right: 8),
+          child: Icon(
+            Icons.circle,
+            size: 8,
+            color: Colors.white54,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 14,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+Widget _buildLoadingScreen() {
+  return Scaffold(
+    backgroundColor: Colors.black,
+    body: Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(
+            color: Colors.white,
+            strokeWidth: 2,
+          ),
+          const SizedBox(height: 20),
+          Text(
+            _statusMessage,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w300,
+            ),
+          ),
+          if (UniversalPlatform.isDesktop) ...[
+            const SizedBox(height: 16),
+            const LinearProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white24),
+              backgroundColor: Colors.transparent,
+              minHeight: 2,
+            ),
+          ],
+        ],
+      ),
+    ),
+  );
+}
+
+Future<void> _checkForCamerasAgain() async {
+  setState(() {
+    _statusMessage = 'Checking for cameras...';
+    _showNoCameraUI = false;
+  });
+  
+  await _initializeDesktopCamera();
+  
+  if (!_isCameraInitialized && !_showNoCameraUI) {
+    setState(() {
+      _statusMessage = 'Still no camera detected';
+      _showNoCameraUI = true;
+    });
+  }
+}
 }
