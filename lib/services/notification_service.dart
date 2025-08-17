@@ -69,10 +69,10 @@ class NotificationService {
 
     if (!remindersSet) {
       // Schedule all 4 daily reminders
-      await _scheduleSingleReminder(8, 30, location);
-      await _scheduleSingleReminder(12, 30, location);
-      await _scheduleSingleReminder(17, 30, location); // 5:30 PM
-      await _scheduleSingleReminder(19, 30, location); // 7:30 PM
+      await _scheduleSingleReminder(8, 30, location, 'Please submit your morning attendance.');
+      await _scheduleSingleReminder(12, 30, location, 'Submit your before lunch attendance');
+      await _scheduleSingleReminder(4, 30, location, 'Submit your after lunch attendance' ); // 5:30 PM
+      await _scheduleSingleReminder(7, 32, location, 'Submit your night attendance.'); // 7:30 PM
 
       await prefs.setBool('reminders_set', true);
     }
@@ -82,6 +82,7 @@ class NotificationService {
     int hour,
     int minute,
     tz.Location location,
+    String text,
   ) async {
     final now = tz.TZDateTime.now(location);
     var scheduledDate = tz.TZDateTime(
