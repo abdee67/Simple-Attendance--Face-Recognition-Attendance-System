@@ -375,23 +375,6 @@ class _LoginScreenState extends State<LoginScreen>
                                     ),
                           ),
                           const SizedBox(height: 16),
-                          ElevatedButton(
-                            onPressed: () {
-                              final notificationService =
-                                  Provider.of<NotificationService>(
-                                    context,
-                                    listen: false,
-                                  );
-                              notificationService
-                                  .showImmediateTestNotification();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Test notification sent!'),
-                                ),
-                              );
-                            },
-                            child: Text('Test Notification'),
-                          ),
                           /** 
                           // Forgot Password Link
                           TextButton(

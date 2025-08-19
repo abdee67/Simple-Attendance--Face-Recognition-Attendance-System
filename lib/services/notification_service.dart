@@ -80,9 +80,6 @@ class NotificationService {
       // Create notification channels
       await _createNotificationChannels();
 
-      // Show immediate test notification
-      await showImmediateTestNotification();
-
       // Schedule daily reminders
       await scheduleDailyReminders();
 
@@ -224,31 +221,6 @@ class NotificationService {
     }
   }
 
-  /// Show immediate test notification
-  Future<void> showImmediateTestNotification() async {
-    try {
-      await _notificationsPlugin.show(
-        testNotificationId,
-        'Attendance App',
-        'Notifications are working correctly!',
-        const NotificationDetails(
-          android: AndroidNotificationDetails(
-            channelId,
-            channelName,
-            channelDescription: channelDesc,
-            importance: Importance.max,
-            priority: Priority.high,
-            playSound: true,
-            enableVibration: true,
-          ),
-        ),
-      );
-      _log('Test notification shown successfully');
-    } catch (e) {
-      _log('Error showing test notification: $e', isError: true);
-    }
-  }
-
   /// Check if a given date is a weekend
   bool _isWeekend(DateTime date) {
     return date.weekday == DateTime.saturday || date.weekday == DateTime.sunday;
@@ -310,12 +282,13 @@ class NotificationService {
           NotificationTexts().getContexualMessage(),
           id: scheduledTestId,
           skipWeekendCheck: true, // Test notification should show regardless
+          showActions: false,
         );
 
         // Get next weekday times
-        final morningTime = _calculateNextWeekdayTime(hour: 8, minute: 30);
+        final morningTime = _calculateNextWeekdayTime(hour: 00, minute: 20);
         final lunchTime = _calculateNextWeekdayTime(hour: 12, minute: 30);
-        final afternoonTime = _calculateNextWeekdayTime(hour: 14, minute: 30);
+        final afternoonTime = _calculateNextWeekdayTime(hour: 00, minute: 30);
         final nightTime = _calculateNextWeekdayTime(hour: 17, minute: 30);
 
         // Schedule daily attendance reminders (weekdays only)
@@ -324,6 +297,7 @@ class NotificationService {
           '🌅 Good Morning! Please submit your morning attendance. Have a great day!',
           id: morningReminderId,
           isDaily: true,
+          showActions: true,
         );
 
         await _scheduleSingleReminder(
@@ -331,6 +305,7 @@ class NotificationService {
           '🍽️ Good Afternoon! Please submit your lunch break attendance. Enjoy your meal!',
           id: lunchReminderId,
           isDaily: true,
+          showActions: true,
         );
 
         await _scheduleSingleReminder(
@@ -338,6 +313,7 @@ class NotificationService {
           '☀️ Hope you are having a good meal! Please submit your after-lunch attendance.',
           id: afternoonReminderId,
           isDaily: true,
+          showActions: true,
         );
 
         await _scheduleSingleReminder(
@@ -345,6 +321,7 @@ class NotificationService {
           '🌙 Hope you are having a good day! Please submit your night attendance. Have a good time!',
           id: nightReminderId,
           isDaily: true,
+          showActions: true,
         );
 
         // Store the last schedule date to detect day changes
@@ -396,6 +373,7 @@ class NotificationService {
     required int id,
     bool isDaily = false,
     bool skipWeekendCheck = false,
+    bool showActions = true,
   }) async {
     try {
       final now = tz.TZDateTime.now(_timezoneLocation);
@@ -444,13 +422,16 @@ class NotificationService {
           ledOffMs: 500,
           colorized: true,
           color: const Color(0xFF2196F3),
-          actions: [
-            AndroidNotificationAction(
-              'submit_action',
-              'Submit Now',
-              showsUserInterface: true,
-            ),
-          ],
+          actions:
+              showActions
+                  ? [
+                    AndroidNotificationAction(
+                      'submit_action',
+                      'Submit Now',
+                      showsUserInterface: true,
+                    ),
+                  ]
+                  : null,
         ),
       );
 
