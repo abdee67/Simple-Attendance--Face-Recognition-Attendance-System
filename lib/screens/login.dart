@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:provider/provider.dart';
+import 'package:simple_attendance/services/notification_service.dart';
 import '/screens/attendance_screen.dart';
 import 'package:sqflite/sqflite.dart';
 import '/db/dbmethods.dart';
@@ -14,7 +16,8 @@ class LoginScreen extends StatefulWidget {
   _LoginScreenState createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
+class _LoginScreenState extends State<LoginScreen>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
@@ -34,16 +37,10 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       duration: const Duration(milliseconds: 1000),
     );
     _fadeAnimation = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: Curves.easeInOut,
-      ),
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
     _scaleAnimation = Tween<double>(begin: 0.8, end: 1).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: Curves.elasticOut,
-      ),
+      CurvedAnimation(parent: _animationController, curve: Curves.elasticOut),
     );
     _animationController.forward();
   }
@@ -55,7 +52,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     _passwordController.dispose();
     super.dispose();
   }
-
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
@@ -180,23 +176,22 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     try {
       final database = await db.database;
       await database.delete('location');
-      
-        await database.insert(
-          'location',
-         {
-          'id': 1,
-          'threshold': (locationData['threshold'] is String)
-              ? double.tryParse(locationData['threshold']) ?? 0
-              : locationData['threshold'],
-          'latitude': (locationData['latitude'] is String)
-              ? double.tryParse(locationData['latitude']) ?? 0
-              : locationData['latitude'],
-          'longitude': (locationData['longitude'] is String)
-              ? double.tryParse(locationData['longitude']) ?? 0
-              : locationData['longitude'],
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+
+      await database.insert('location', {
+        'id': 1,
+        'threshold':
+            (locationData['threshold'] is String)
+                ? double.tryParse(locationData['threshold']) ?? 0
+                : locationData['threshold'],
+        'latitude':
+            (locationData['latitude'] is String)
+                ? double.tryParse(locationData['latitude']) ?? 0
+                : locationData['latitude'],
+        'longitude':
+            (locationData['longitude'] is String)
+                ? double.tryParse(locationData['longitude']) ?? 0
+                : locationData['longitude'],
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     } catch (e) {
       _showError('Failed to reset and sync addresses: ${e.toString()}');
       rethrow;
@@ -208,26 +203,23 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       SnackBar(
         content: Text(message),
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         backgroundColor: Colors.red.shade400,
       ),
     );
   }
 
   Future<void> _navigateToHome() async {
-  if (!mounted) return;
-  
-  
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (context) => AttendanceScreen(userId: _usernameController.text, )
-       
-    ),
-  );
-}
+    if (!mounted) return;
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder:
+            (context) => AttendanceScreen(userId: _usernameController.text),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -237,10 +229,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         builder: (context, child) {
           return Opacity(
             opacity: _fadeAnimation.value,
-            child: Transform.scale(
-              scale: _scaleAnimation.value,
-              child: child,
-            ),
+            child: Transform.scale(scale: _scaleAnimation.value, child: child),
           );
         },
         child: Container(
@@ -282,17 +271,18 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                               const SizedBox(height: 16),
                               Text(
                                 'Savvy Attendance',
-                                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.blue.shade800,
-                                    ),
+                                style: Theme.of(
+                                  context,
+                                ).textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue.shade800,
+                                ),
                               ),
                               const SizedBox(height: 8),
                               Text(
                                 'Sign in to continue',
-                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                      color: Colors.grey.shade600,
-                                    ),
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(color: Colors.grey.shade600),
                               ),
                             ],
                           ),
@@ -310,7 +300,8 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                               filled: true,
                               fillColor: Colors.grey.shade50,
                             ),
-                            validator: (value) => value!.isEmpty ? 'Required' : null,
+                            validator:
+                                (value) => value!.isEmpty ? 'Required' : null,
                           ),
                           const SizedBox(height: 16),
 
@@ -339,7 +330,8 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                               fillColor: Colors.grey.shade50,
                             ),
                             obscureText: _obscurePassword,
-                            validator: (value) => value!.isEmpty ? 'Required' : null,
+                            validator:
+                                (value) => value!.isEmpty ? 'Required' : null,
                           ),
                           const SizedBox(height: 24),
 
@@ -347,35 +339,60 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                           SizedBox(
                             width: double.infinity,
                             height: 50,
-                            child: _isLoading
-                                ? const Center(
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-                                    ),
-                                  )
-                                : ElevatedButton(
-                                    onPressed: _login,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.blue.shade800,
-                                      foregroundColor: Colors.white,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
+                            child:
+                                _isLoading
+                                    ? const Center(
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              Colors.blue,
+                                            ),
                                       ),
-                                      elevation: 4,
-                                      padding: const EdgeInsets.symmetric(vertical: 14),
-                                    ),
-                                    child: const Text(
-                                      'LOGIN',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
+                                    )
+                                    : ElevatedButton(
+                                      onPressed: _login,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.blue.shade800,
+                                        foregroundColor: Colors.white,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                        ),
+                                        elevation: 4,
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 14,
+                                        ),
+                                      ),
+                                      child: const Text(
+                                        'LOGIN',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
                                       ),
                                     ),
-                                  ),
                           ),
                           const SizedBox(height: 16),
-/** 
+                          ElevatedButton(
+                            onPressed: () {
+                              final notificationService =
+                                  Provider.of<NotificationService>(
+                                    context,
+                                    listen: false,
+                                  );
+                              notificationService
+                                  .showImmediateTestNotification();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Test notification sent!'),
+                                ),
+                              );
+                            },
+                            child: Text('Test Notification'),
+                          ),
+                          /** 
                           // Forgot Password Link
                           TextButton(
                             onPressed: () {

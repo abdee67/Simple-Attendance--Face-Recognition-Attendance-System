@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:simple_attendance/services/notification_service.dart';
+import 'package:provider/provider.dart';
 
 class HomeScreen extends StatelessWidget{
   final String username;
@@ -43,6 +45,18 @@ Widget build(BuildContext context) {
             label: "Site Entry",
             color: const Color(0xFF4CAF50),
             onPressed: () => Navigator.pushNamed(context, '/sites'),
+          ),
+          _buildDashboardButton(
+            icon: Icons.notifications,
+            label: "Test Notification",
+            color: Colors.blue,
+            onPressed: () {
+              final notificationService = Provider.of<NotificationService>(context, listen: false);
+              notificationService.showImmediateTestNotification();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Test notification sent!')),
+              );
+            },
           ),
         ],
       ),
