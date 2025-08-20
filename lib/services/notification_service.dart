@@ -274,7 +274,7 @@ class NotificationService {
         _log('Setting up daily reminders (weekdays only)...');
 
         // Clear any existing notifications
-        await _notificationsPlugin.cancelAll();
+        // await _notificationsPlugin.cancelAll();
 
         // Schedule test notification (immediate, not affected by weekend check)
         await _scheduleSingleReminder(
@@ -286,9 +286,9 @@ class NotificationService {
         );
 
         // Get next weekday times
-        final morningTime = _calculateNextWeekdayTime(hour: 00, minute: 20);
+        final morningTime = _calculateNextWeekdayTime(hour: 08, minute: 30);
         final lunchTime = _calculateNextWeekdayTime(hour: 12, minute: 30);
-        final afternoonTime = _calculateNextWeekdayTime(hour: 00, minute: 30);
+        final afternoonTime = _calculateNextWeekdayTime(hour: 14, minute: 30);
         final nightTime = _calculateNextWeekdayTime(hour: 17, minute: 30);
 
         // Schedule daily attendance reminders (weekdays only)
@@ -411,7 +411,7 @@ class NotificationService {
           fullScreenIntent: true,
           showWhen: true,
           when: scheduledDate.millisecondsSinceEpoch,
-          ticker: 'Attendance Reminder',
+          ticker: 'Savvy Reminder',
           visibility: NotificationVisibility.public,
           timeoutAfter: 3600000, // 1 hour
           category: AndroidNotificationCategory.reminder,
@@ -439,7 +439,7 @@ class NotificationService {
         // For daily reminders, use time components to repeat daily but skip weekends
         await _notificationsPlugin.zonedSchedule(
           id,
-          'Attendance Reminder',
+          'Savvy Reminder',
           message,
           scheduledDate,
           notificationDetails,
@@ -451,11 +451,12 @@ class NotificationService {
         // For one-time reminders
         await _notificationsPlugin.zonedSchedule(
           id,
-          'Attendance Reminder',
+          'Savvy Reminder',
           message,
           scheduledDate,
           notificationDetails,
           androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          matchDateTimeComponents: DateTimeComponents.time,
           payload: 'attendance_reminder_$id',
         );
       }

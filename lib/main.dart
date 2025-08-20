@@ -30,7 +30,7 @@ void main() async {
 
   // Initialize notifications
   await notificationService.initialize();
-  await notificationService.resetAndReschedule();
+  // await notificationService.resetAndReschedule();
   await notificationService.checkPermissions();
 
   // Process any pending syncs
