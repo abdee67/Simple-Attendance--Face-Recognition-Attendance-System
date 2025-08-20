@@ -80,6 +80,9 @@ class NotificationService {
       // Create notification channels
       await _createNotificationChannels();
 
+      // Show immediate test notification
+      await showImmediateTestNotification();
+
       // Schedule daily reminders
       await scheduleDailyReminders();
 
@@ -93,6 +96,47 @@ class NotificationService {
         isError: true,
       );
       await _showErrorNotification('Initialization Error', e.toString());
+    }
+  }
+
+  /// Show immediate test notification
+  Future<void> showImmediateTestNotification() async {
+    try {
+      await _notificationsPlugin.show(
+        testNotificationId,
+        'Savvy Booster',
+        NotificationTexts().getContexualMessage(),
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            channelId,
+            channelName,
+            channelDescription: channelDesc,
+            importance: Importance.max,
+            priority: Priority.max,
+            playSound: true,
+            sound: const RawResourceAndroidNotificationSound('notification'),
+            enableVibration: true,
+            vibrationPattern: Int64List.fromList([0, 500, 500, 500]),
+            autoCancel: true,
+            fullScreenIntent: true,
+            showWhen: true,
+            ticker: 'Savvy Booster',
+            visibility: NotificationVisibility.public,
+            timeoutAfter: 3600000, // 1 hour
+            category: AndroidNotificationCategory.reminder,
+            channelShowBadge: true,
+            enableLights: true,
+            ledColor: const Color(0xFF2196F3),
+            ledOnMs: 1000,
+            ledOffMs: 500,
+            colorized: true,
+            color: const Color(0xFF2196F3),
+          ),
+        ),
+      );
+      _log('Test notification shown successfully');
+    } catch (e) {
+      _log('Error showing test notification: $e', isError: true);
     }
   }
 
@@ -274,21 +318,21 @@ class NotificationService {
         _log('Setting up daily reminders (weekdays only)...');
 
         // Clear any existing notifications
-        // await _notificationsPlugin.cancelAll();
+        //await _notificationsPlugin.cancelAll();
 
         // Schedule test notification (immediate, not affected by weekend check)
         await _scheduleSingleReminder(
           tz.TZDateTime.now(_timezoneLocation).add(const Duration(seconds: 10)),
-          NotificationTexts().getContexualMessage(),
+          'Welcome to Savvy!',
           id: scheduledTestId,
           skipWeekendCheck: true, // Test notification should show regardless
           showActions: false,
         );
 
         // Get next weekday times
-        final morningTime = _calculateNextWeekdayTime(hour: 08, minute: 30);
+        final morningTime = _calculateNextWeekdayTime(hour: 8, minute: 30);
         final lunchTime = _calculateNextWeekdayTime(hour: 12, minute: 30);
-        final afternoonTime = _calculateNextWeekdayTime(hour: 14, minute: 30);
+        final afternoonTime = _calculateNextWeekdayTime(hour: 13, minute: 30);
         final nightTime = _calculateNextWeekdayTime(hour: 17, minute: 30);
 
         // Schedule daily attendance reminders (weekdays only)

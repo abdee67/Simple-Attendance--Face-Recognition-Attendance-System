@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:simple_attendance/services/api_service.dart';
-import 'package:simple_attendance/services/face_service.dart';
 import 'package:simple_attendance/services/notification_service.dart';
 
 import 'db/dbmethods.dart';
@@ -17,7 +16,6 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize services
-  await FaceService.init();
   final apiService = ApiService();
   final database = AttendancedbMethods.instance;
   final notificationService = NotificationService();
